@@ -21,7 +21,7 @@ SAVE_EVERY = int(os.environ.get("SAVE_EVERY", 15))  # 0 = disabled
 # ── Reward ────────────────────────────────────────────────────────────────────
 IMG_SIZE = int(os.environ.get("IMG_SIZE", 256))
 VIEWPORT_W = int(os.environ.get("VIEWPORT_W", 512))
-VIEWPORT_H = int(os.environ.get("VIEWPORT_H", 512))
+VIEWPORT_H = int(os.environ.get("VIEWPORT_H", 1536))
 
 # ── Dataset ───────────────────────────────────────────────────────────────────
 WEBSIGHT_TARGET = int(os.environ.get("WEBSIGHT_TARGET", 2000))
