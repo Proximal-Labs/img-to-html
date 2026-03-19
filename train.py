@@ -9,6 +9,7 @@ import json
 import logging
 import os
 import random
+import sys
 import time
 
 import numpy as np
@@ -235,54 +236,23 @@ def main():
     with open(os.path.join(LOG_DIR, "model_path.txt"), "w") as f:
         f.write(model_path)
 
-    # Eval: compare base vs RL
-    n_eval = int(os.environ.get("N_EVAL", 10))
-    if n_eval > 0:
-        random.seed(42)
-        logger.info(f"\nRunning eval on {n_eval} held-out examples...")
-
-        rl_sampler = service_client.create_sampling_client(model_path=model_path)
-        base_client = service_client.create_lora_training_client(base_model=MODEL, rank=LORA_RANK)
-        base_sampler = base_client.save_weights_and_get_sampling_client()
-
-        eval_params = types.SamplingParams(
-            max_tokens=MAX_TOKENS, stop=renderer.get_stop_sequences(), temperature=0.3,
-        )
-
-        eval_pool = dataset[n_batches * BATCH_SIZE:]
-        if len(eval_pool) < n_eval:
-            eval_pool = dataset
-        eval_samples = random.sample(eval_pool, min(n_eval, len(eval_pool)))
-
-        os.makedirs(EVAL_DIR, exist_ok=True)
-        render_page = browser.new_page(viewport={"width": VIEWPORT_W, "height": VIEWPORT_H})
-        base_rewards, rl_rewards = [], []
-
-        for i, item in enumerate(eval_samples):
-            prompt = build_prompt(renderer, item["screenshot"])
-            ref_img = load_reference_image(item["screenshot"], size=IMG_SIZE)
-            page = reward_pages[i % len(reward_pages)]
-
-            # Base
-            br = base_sampler.sample(prompt=prompt, num_samples=1, sampling_params=eval_params).result()
-            base_html = extract_html_from_response(get_text_content(renderer.parse_response(br.sequences[0].tokens)[0]))
-            base_reward = compute_visual_reward(base_html, ref_img, page)
-
-            # RL
-            rr = rl_sampler.sample(prompt=prompt, num_samples=1, sampling_params=eval_params).result()
-            rl_html = extract_html_from_response(get_text_content(renderer.parse_response(rr.sequences[0].tokens)[0]))
-            rl_reward = compute_visual_reward(rl_html, ref_img, page)
-
-            base_rewards.append(base_reward)
-            rl_rewards.append(rl_reward)
-            logger.info(f"  Eval {i+1}/{n_eval}: base={base_reward:.3f} rl={rl_reward:.3f} delta={rl_reward-base_reward:+.3f}")
-
-        wins = sum(1 for b, r in zip(base_rewards, rl_rewards) if r > b)
-        logger.info(f"\n  Base avg: {np.mean(base_rewards):.3f}  RL avg: {np.mean(rl_rewards):.3f}  "
-                     f"Improvement: {np.mean(rl_rewards)-np.mean(base_rewards):+.3f}  RL wins: {wins}/{n_eval}")
-
     browser.close()
     pw.stop()
+
+    # Run eval via eval.py subprocess
+    n_eval = int(os.environ.get("N_EVAL", 10))
+    if n_eval > 0:
+        import subprocess
+        from datetime import datetime
+        eval_name = datetime.now().strftime("train_%Y%m%d_%H%M%S")
+        logger.info(f"\nRunning eval (n={n_eval}, name={eval_name})...")
+        subprocess.run([
+            sys.executable, os.path.join(os.path.dirname(__file__), "eval.py"),
+            "--n", str(n_eval),
+            "--model_path", model_path,
+            "--name", eval_name,
+        ])
+
     logger.info("Done!")
 
 
