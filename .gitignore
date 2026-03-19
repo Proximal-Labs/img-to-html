@@ -1,5 +1,9 @@
 .env
+.venv/
 data/
+runs/
+eval_output/
 __pycache__/
 *.pyc
-/tmp/
+*.egg-info/
+.DS_Store

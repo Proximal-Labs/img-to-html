@@ -1,21 +1,30 @@
 #!/bin/bash
 set -e
 
-# Load API key
-source .env
-export TINKER_API_KEY
+# Ensure API key is set
+if [ -z "$TINKER_API_KEY" ]; then
+    if [ -f .env ]; then
+        source .env
+        export TINKER_API_KEY
+    else
+        echo "Error: TINKER_API_KEY not set. Export it or create a .env file (see .env.example)."
+        exit 1
+    fi
+fi
 
 echo "=== Step 1: Install dependencies ==="
 pip install -r requirements.txt
-pip install tinker-cookbook
+pip install -e /path/to/tinker-cookbook  # or: pip install tinker-cookbook
 playwright install chromium
 
 echo ""
 echo "=== Step 2: Generate dataset ==="
-# Use web-sourced dataset (WebSight + Design2Code) instead of synthetic snippets
-# To use simple synthetic snippets instead, run: python generate_dataset.py
 python generate_dataset_web.py
 
 echo ""
 echo "=== Step 3: Train ==="
 python train.py
+
+echo ""
+echo "=== Step 4: Eval ==="
+python eval.py

@@ -1,8 +1,0 @@
-{
-  "base_mean": 0.2523,
-  "n_eval": 10,
-  "rl_mean": 0.3319,
-  "improvement": 0.0796,
-  "rl_wins": 6,
-  "rl_model_path": "tinker://c222701c-9139-516e-b781-53df5d6e94cc:train:0/sampler_weights/prox-final"
-}

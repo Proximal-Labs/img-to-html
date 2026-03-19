@@ -1,0 +1,40 @@
+"""Shared configuration for screenshot-to-HTML RL training."""
+
+import os
+
+# ── Model ─────────────────────────────────────────────────────────────────────
+MODEL = os.environ.get("MODEL", "Qwen/Qwen3.5-4B")
+LORA_RANK = int(os.environ.get("LORA_RANK", 32))
+RENDERER_NAME = "qwen3_5_disable_thinking"
+
+# ── Training ──────────────────────────────────────────────────────────────────
+BATCH_SIZE = int(os.environ.get("BATCH_SIZE", 8))
+GROUP_SIZE = int(os.environ.get("GROUP_SIZE", 8))
+MAX_BATCHES = int(os.environ.get("MAX_BATCHES", 0))  # 0 = all
+LR = float(os.environ.get("LR", 4e-5))
+MAX_TOKENS = int(os.environ.get("MAX_TOKENS", 1024))
+KL_BETA = float(os.environ.get("KL_BETA", 0.05))
+PPO_CLIP_LOW = float(os.environ.get("PPO_CLIP_LOW", 0.8))
+PPO_CLIP_HIGH = float(os.environ.get("PPO_CLIP_HIGH", 1.2))
+SAVE_EVERY = int(os.environ.get("SAVE_EVERY", 10))  # 0 = disabled
+
+# ── Reward ────────────────────────────────────────────────────────────────────
+IMG_SIZE = int(os.environ.get("IMG_SIZE", 256))
+VIEWPORT_W = int(os.environ.get("VIEWPORT_W", 512))
+VIEWPORT_H = int(os.environ.get("VIEWPORT_H", 512))
+
+# ── Paths ─────────────────────────────────────────────────────────────────────
+PROJECT_DIR = os.path.dirname(os.path.abspath(__file__))
+DATA_DIR = os.path.join(PROJECT_DIR, "data")
+MANIFEST_PATH = os.path.join(DATA_DIR, "manifest.json")
+LOG_DIR = os.environ.get("LOG_DIR", os.path.join(PROJECT_DIR, "runs"))
+MODEL_PATH_FILE = os.path.join(LOG_DIR, "model_path.txt")
+EVAL_DIR = os.path.join(PROJECT_DIR, "eval_output")
+
+# ── Prompt ────────────────────────────────────────────────────────────────────
+SYSTEM_PROMPT = (
+    "You are an expert at converting screenshots of web pages into HTML/CSS code. "
+    "Given a screenshot, output ONLY the HTML/CSS code that reproduces the visual appearance. "
+    "Use inline styles or a <style> block. Do not include <html>, <head>, or <body> wrapper tags. "
+    "Wrap your code in ```html ... ```."
+)

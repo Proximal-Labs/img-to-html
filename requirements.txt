@@ -1,8 +1,10 @@
-tinker-api
+tinker
+tinker-cookbook
 playwright
 Pillow
 scikit-image
 numpy
 torch
 tqdm
+transformers
 datasets

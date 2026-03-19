@@ -1,7 +1,0 @@
-{
-  "screenshot": "/Users/justinwei/Desktop/coding_projects/prox/data/screenshots/0070.png",
-  "ground_truth_html": "<style>\nbody {\n    display: flex;\n    height: 100vh;\n    margin: 0;\n    background-color: #E3F2FD;\n    color: #1A237E;\n    font-family: Arial, sans-serif;\n}\n\n.sidebar {\n    width: 300px; \n    padding: 15px;\n    height: 100%;\n    background-color: #BBDEFB;\n}\n\n.main {\n    flex-grow: 1;\n    padding: 15px;\n    display: flex;\n    flex-direction: column;\n    justify-content: space-between;\n}\n\nh2, h1, p {\n    margin: 0;\n}\n\n.call-to-action {\n    width: 200px;\n    height: 50px;\n    background-color: #1565C0;\n    color: white;\n    font-size: 1em;\n    border: none;\n}\n</style>\n<div class=\"sidebar\">\n        <h2>Our Mission</h2>\n        <p>We are dedicated to preserving and protecting the environment for future generations.</p>\n        <h2>Our Programs</h2>\n        <p>We're committed to promoting green projects, initiatives to encourage citizens to participate actively in the environmental preservation.</p>\n    </div>\n    <div class=\"main\">\n        <h1>Join Us Today</h1>\n        <p>A small act can make a big difference in conserving the environment. Join our cause and become part of our mission.</p>\n        <button class=\"call-to-action\">Join Us</button>\n    </div>",
-  "base_reward": 0.1528,
-  "rl_reward": 0.262,
-  "delta": 0.1091
-}
