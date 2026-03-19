@@ -16,7 +16,7 @@ MAX_TOKENS = int(os.environ.get("MAX_TOKENS", 1024))
 KL_BETA = float(os.environ.get("KL_BETA", 0.05))
 PPO_CLIP_LOW = float(os.environ.get("PPO_CLIP_LOW", 0.8))
 PPO_CLIP_HIGH = float(os.environ.get("PPO_CLIP_HIGH", 1.2))
-SAVE_EVERY = int(os.environ.get("SAVE_EVERY", 10))  # 0 = disabled
+SAVE_EVERY = int(os.environ.get("SAVE_EVERY", 15))  # 0 = disabled
 
 # ── Reward ────────────────────────────────────────────────────────────────────
 IMG_SIZE = int(os.environ.get("IMG_SIZE", 256))

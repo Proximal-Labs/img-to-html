@@ -66,20 +66,24 @@ def render_html(page, html: str) -> np.ndarray | None:
 
 
 def fetch_websight_samples(n_target: int, n_candidates: int) -> list[dict]:
-    """Download and filter samples from WebSight v0.2."""
+    """Download and filter samples from WebSight v0.2 using streaming."""
     from datasets import load_dataset
 
-    print(f"Loading WebSight v0.2 ({n_candidates} candidates)...")
+    print(f"Loading WebSight v0.2 (streaming, up to {n_candidates} candidates)...")
     ds = load_dataset(
         "HuggingFaceM4/WebSight",
         name="v0.2",
-        split=f"train[:{n_candidates}]",
+        split="train",
+        streaming=True,
     )
 
     samples = []
     skipped = 0
 
     for i, row in enumerate(ds):
+        if i >= n_candidates:
+            break
+
         html = row["text"]
         if len(html) > MAX_HTML_CHARS:
             skipped += 1
