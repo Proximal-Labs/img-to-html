@@ -33,7 +33,8 @@ from config import (
     LOG_DIR, SYSTEM_PROMPT, EVAL_DIR,
 )
 from reward import (
-    compute_visual_reward, extract_html_from_response,
+    compute_visual_reward, compute_reward_from_info,
+    extract_html_from_response, extract_ref_info, extract_gen_info,
     load_reference_image, render_html_to_file,
 )
 
@@ -142,9 +143,9 @@ def main():
             logger.info(f"Saving checkpoint at batch {batch_idx}...")
             training_client.save_state(name=f"checkpoint-{batch_idx:04d}").result()
 
-        # 1. Sample rollouts
+        # 1. Sample rollouts + pre-extract reference DOM info
         sampling_client = training_client.save_weights_and_get_sampling_client()
-        futures, prompts, ref_images, ref_htmls = [], [], [], []
+        futures, prompts, ref_infos = [], [], []
 
         for item in batch:
             prompt = build_prompt(renderer, item["screenshot"])
@@ -153,16 +154,19 @@ def main():
             )
             futures.append(future)
             prompts.append(prompt)
-            ref_images.append(load_reference_image(item["screenshot"], size=IMG_SIZE))
-            ref_htmls.append(item.get("reference_html") or item["html"])
+
+            # Cache: extract ref DOM once per prompt, reuse for all rollouts
+            page = reward_pages[len(futures) % len(reward_pages)]
+            ref_html = item.get("reference_html") or item["html"]
+            ref_infos.append(extract_ref_info(page, ref_html, size=IMG_SIZE))
 
         # 2. Compute rewards & build datums
         datums: list[types.Datum] = []
         batch_rewards: list[float] = []
         batch_kl: list[float] = []
 
-        for idx, (future, prompt, ref_img, ref_html) in enumerate(
-            tqdm(zip(futures, prompts, ref_images, ref_htmls), total=len(futures), desc=f"Batch {batch_idx}")
+        for idx, (future, prompt, ref_info) in enumerate(
+            tqdm(zip(futures, prompts, ref_infos), total=len(futures), desc=f"Batch {batch_idx}")
         ):
             result = future.result()
             rewards_G: list[float] = []
@@ -177,9 +181,15 @@ def main():
                 parsed_msg, _ = renderer.parse_response(seq.tokens)
                 content = get_text_content(parsed_msg)
                 generated_html = extract_html_from_response(content)
-                visual_reward = compute_visual_reward(
-                    generated_html, ref_img, page, size=IMG_SIZE, reference_html=ref_html,
-                )
+
+                if generated_html is None:
+                    visual_reward = -1.0
+                else:
+                    try:
+                        gen_info = extract_gen_info(page, generated_html, size=IMG_SIZE)
+                        visual_reward, _ = compute_reward_from_info(ref_info, gen_info)
+                    except Exception:
+                        visual_reward = -1.0
 
                 kl = -sum(seq.logprobs) / len(seq.logprobs) if seq.logprobs else 0.0
                 rewards_G.append(visual_reward - KL_BETA * kl)
