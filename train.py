@@ -1,8 +1,8 @@
 """
 RL training loop: screenshot → HTML/CSS using Tinker + Qwen3.5-4B.
 
-Uses GRPO-style advantage centering with importance sampling loss.
-Reward = SSIM between original screenshot and rendered generated HTML.
+Uses GRPO-style advantage centering with PPO clipped loss.
+Reward = visual similarity (SSIM + MSE) - KL penalty.
 """
 
 import json
@@ -19,8 +19,8 @@ from PIL import Image
 from playwright.sync_api import sync_playwright
 from tqdm import tqdm
 
-from tinker_cookbook import model_info, renderers
-from tinker_cookbook.renderers import ImagePart, TextPart, get_text_content
+from tinker_cookbook import renderers
+from tinker_cookbook.renderers import get_text_content
 from tinker_cookbook.tokenizer_utils import get_tokenizer
 from reward import compute_visual_reward, extract_html_from_response, load_reference_image
 
@@ -31,13 +31,17 @@ logger = logging.getLogger(__name__)
 
 MODEL = "Qwen/Qwen3.5-4B"
 BATCH_SIZE = 8          # screenshots per batch
-GROUP_SIZE = 4          # rollouts per screenshot
+GROUP_SIZE = 8          # rollouts per screenshot (up from 4)
 MAX_BATCHES = int(os.environ.get("MAX_BATCHES", 0))  # 0 = all batches
 LR = 4e-5
 LORA_RANK = 32
-MAX_TOKENS = 1024       # enough for web-sourced HTML snippets
-IMG_SIZE = 256          # resize for SSIM comparison
+MAX_TOKENS = 1024
+IMG_SIZE = 256
 LOG_DIR = "/tmp/prox-rl"
+SAVE_EVERY = 10         # checkpoint every N batches (0 = disabled)
+KL_BETA = 0.05          # KL penalty coefficient
+PPO_CLIP_LOW = 0.8      # PPO clip range
+PPO_CLIP_HIGH = 1.2
 
 SYSTEM_PROMPT = (
     "You are an expert at converting screenshots of web pages into HTML/CSS code. "
@@ -76,6 +80,25 @@ def build_prompt(renderer, screenshot_path: str):
     return renderer.build_generation_prompt(convo)
 
 
+def compute_kl_penalty(sampling_logprobs: list[float]) -> float:
+    """
+    Approximate per-rollout KL divergence from the base policy.
+
+    Since we snapshot weights before each batch, the sampling logprobs
+    ARE from the current policy. The KL is approximated as the mean
+    negative log-probability (higher = model is less confident = more
+    divergent from a "confident" base). This is a simplified proxy —
+    true KL would need a separate forward pass through the base model.
+
+    For GRPO the main regularization comes from advantage centering,
+    but this adds a soft penalty for low-confidence / degenerate outputs.
+    """
+    if not sampling_logprobs:
+        return 0.0
+    # Mean negative logprob as proxy for "how far from confident base"
+    return -sum(sampling_logprobs) / len(sampling_logprobs)
+
+
 # ── Main training loop ───────────────────────────────────────────────────────
 
 def main():
@@ -88,9 +111,7 @@ def main():
         n_batches = min(n_batches, MAX_BATCHES)
     logger.info(f"Loaded {len(dataset)} examples, {n_batches} batches")
 
-    # Setup tokenizer + renderer (VLM needs image_processor)
-    # Use disable_thinking renderer so the model outputs HTML directly
-    # instead of spending tokens on chain-of-thought reasoning
+    # Setup tokenizer + renderer
     tokenizer = get_tokenizer(MODEL)
     renderer_name = "qwen3_5_disable_thinking"
 
@@ -121,14 +142,23 @@ def main():
     # Playwright for reward computation
     pw = sync_playwright().start()
     browser = pw.chromium.launch()
-    # Pool of pages for parallel reward computation
-    reward_pages = [browser.new_page(viewport={"width": 512, "height": 512}) for _ in range(4)]
+    reward_pages = [browser.new_page(viewport={"width": 512, "height": 512}) for _ in range(8)]
 
-    logger.info("Starting RL training loop")
+    logger.info(
+        f"Starting RL training: GROUP_SIZE={GROUP_SIZE}, KL_BETA={KL_BETA}, "
+        f"PPO_CLIP=[{PPO_CLIP_LOW}, {PPO_CLIP_HIGH}], SAVE_EVERY={SAVE_EVERY}"
+    )
 
     for batch_idx in range(n_batches):
         t_start = time.time()
         batch = dataset[batch_idx * BATCH_SIZE : (batch_idx + 1) * BATCH_SIZE]
+
+        # ── Checkpoint ────────────────────────────────────────────────────
+        if SAVE_EVERY > 0 and batch_idx > 0 and batch_idx % SAVE_EVERY == 0:
+            logger.info(f"Saving checkpoint at batch {batch_idx}...")
+            training_client.save_state(
+                name=f"checkpoint-{batch_idx:04d}",
+            ).result()
 
         # ── 1. Sample rollouts ────────────────────────────────────────────
         sampling_client = training_client.save_weights_and_get_sampling_client()
@@ -151,6 +181,7 @@ def main():
         # ── 2. Compute rewards & build datums ─────────────────────────────
         datums: list[types.Datum] = []
         batch_rewards: list[float] = []
+        batch_kl: list[float] = []
 
         for idx, (future, prompt, ref_img) in enumerate(
             tqdm(
@@ -170,19 +201,25 @@ def main():
                 tokens_G.append(seq.tokens)
                 logprobs_G.append(seq.logprobs)
 
-                # Parse response and compute reward
+                # Parse response and compute visual reward
                 parsed_msg, _ = renderer.parse_response(seq.tokens)
                 content = get_text_content(parsed_msg)
                 generated_html = extract_html_from_response(content)
-                reward = compute_visual_reward(generated_html, ref_img, page, size=IMG_SIZE)
+                visual_reward = compute_visual_reward(generated_html, ref_img, page, size=IMG_SIZE)
+
+                # KL penalty: penalize divergence from base
+                kl = compute_kl_penalty(seq.logprobs)
+                reward = visual_reward - KL_BETA * kl
+
                 rewards_G.append(reward)
+                batch_kl.append(kl)
 
             # GRPO advantage centering
             mean_reward = sum(rewards_G) / len(rewards_G)
             advantages_G = [r - mean_reward for r in rewards_G]
             batch_rewards.append(mean_reward)
 
-            # Skip if no variance (all same reward)
+            # Skip if no variance
             if all(a == 0.0 for a in advantages_G):
                 continue
 
@@ -211,12 +248,19 @@ def main():
                 )
                 datums.append(datum)
 
-        # ── 3. Training step ──────────────────────────────────────────────
+        # ── 3. Training step (PPO clipped loss) ──────────────────────────
         if len(datums) == 0:
             logger.warning(f"Batch {batch_idx}: no datums (all rollouts identical), skipping")
             continue
 
-        fwd_bwd_future = training_client.forward_backward(datums, loss_fn="importance_sampling")
+        fwd_bwd_future = training_client.forward_backward(
+            datums,
+            loss_fn="ppo",
+            loss_fn_config={
+                "clip_low_threshold": PPO_CLIP_LOW,
+                "clip_high_threshold": PPO_CLIP_HIGH,
+            },
+        )
         optim_future = training_client.optim_step(adam_params)
         fwd_bwd_future.result()
         optim_future.result()
@@ -224,17 +268,20 @@ def main():
         # ── 4. Log metrics ────────────────────────────────────────────────
         elapsed = time.time() - t_start
         mean_batch_reward = sum(batch_rewards) / len(batch_rewards) if batch_rewards else 0.0
+        mean_kl = sum(batch_kl) / len(batch_kl) if batch_kl else 0.0
         metrics = {
             "batch": batch_idx,
-            "reward_mean": mean_batch_reward,
-            "reward_min": min(batch_rewards) if batch_rewards else 0.0,
-            "reward_max": max(batch_rewards) if batch_rewards else 0.0,
+            "reward_mean": round(mean_batch_reward, 4),
+            "reward_min": round(min(batch_rewards), 4) if batch_rewards else 0.0,
+            "reward_max": round(max(batch_rewards), 4) if batch_rewards else 0.0,
+            "kl_mean": round(mean_kl, 4),
             "n_datums": len(datums),
             "elapsed_s": round(elapsed, 1),
         }
         logger.info(
             f"Batch {batch_idx}/{n_batches}: "
             f"reward={mean_batch_reward:.3f} "
+            f"kl={mean_kl:.3f} "
             f"datums={len(datums)} "
             f"time={elapsed:.1f}s"
         )
@@ -246,8 +293,9 @@ def main():
     pw.stop()
     metrics_file.close()
 
-    # Save final weights
-    logger.info("Saving final weights...")
+    # Save final checkpoint + weights
+    logger.info("Saving final checkpoint...")
+    training_client.save_state(name="final").result()
     final_client = training_client.save_weights_and_get_sampling_client(name="prox-final")
     logger.info("Final model saved")
     logger.info("Training complete!")
