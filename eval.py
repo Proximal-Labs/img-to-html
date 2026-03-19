@@ -128,9 +128,10 @@ def main():
         page = reward_pages[i % len(reward_pages)]
         prompt = build_prompt(renderer, item["screenshot"])
 
-        # Re-render reference as full-page screenshot (dataset screenshots are viewport-only)
+        # Save both the original dataset screenshot and a re-rendered version
         ref_html = item.get("reference_html") or item["html"]
-        render_html_to_file(render_page, ref_html, os.path.join(example_dir, "reference.png"))
+        shutil.copy2(item["screenshot"], os.path.join(example_dir, "ref-img.png"))
+        render_html_to_file(render_page, ref_html, os.path.join(example_dir, "ref-render.png"))
 
         # Base model
         base_result = base_sampler.sample(prompt=prompt, num_samples=1, sampling_params=eval_params).result()
