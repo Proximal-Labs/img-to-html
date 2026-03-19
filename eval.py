@@ -1,25 +1,25 @@
 """
 Eval: compare base Qwen3.5-4B vs RL-trained model on held-out screenshots.
 
+Saves per-example:
+  - reference screenshot (copied from dataset)
+  - base model generated HTML + rendered screenshot
+  - RL model generated HTML + rendered screenshot
+  - reward scores
+
 Usage:
-    # Compare base vs RL (loads model path from /tmp/prox-rl/model_path.txt)
-    python eval.py
-
-    # Specify RL model path explicitly
-    python eval.py --model_path "tinker://abc123/weights/prox-final"
-
-    # Base-only eval
-    python eval.py --base_only
-
-    # More examples
-    python eval.py --n 20
+    python eval.py                     # auto-loads RL model from last train
+    python eval.py --n 20              # more examples
+    python eval.py --model_path "tinker://..."  # explicit model path
+    python eval.py --base_only         # base-only eval
 """
 
 import argparse
+import io
 import json
 import os
 import random
-import sys
+import shutil
 
 import numpy as np
 import tinker
@@ -35,6 +35,7 @@ from reward import (
     extract_html_from_response,
     load_reference_image,
     compute_visual_reward,
+    _is_full_html,
 )
 
 MODEL = "Qwen/Qwen3.5-4B"
@@ -71,39 +72,41 @@ def build_prompt(renderer, screenshot_path: str):
     return renderer.build_generation_prompt(convo)
 
 
-def eval_model(tag, sampler, renderer, samples, eval_params, reward_pages):
-    """Evaluate a model on samples, return rewards and results."""
-    rewards = []
-    results = []
+def render_html_to_screenshot(page, html_snippet: str, save_path: str):
+    """Render HTML to a screenshot file. Returns True if successful."""
+    if html_snippet is None:
+        # Save a blank/error image
+        img = Image.new("RGB", (512, 512), (240, 240, 240))
+        img.save(save_path)
+        return False
 
-    for i, item in enumerate(samples):
-        prompt = build_prompt(renderer, item["screenshot"])
-        ref_img = load_reference_image(item["screenshot"], size=IMG_SIZE)
-        page = reward_pages[i % len(reward_pages)]
-
-        result = sampler.sample(prompt=prompt, num_samples=1, sampling_params=eval_params).result()
-        parsed_msg, _ = renderer.parse_response(result.sequences[0].tokens)
-        content = get_text_content(parsed_msg)
-        generated_html = extract_html_from_response(content)
-        reward = compute_visual_reward(generated_html, ref_img, page)
-
-        rewards.append(reward)
-        results.append({
-            "screenshot": item["screenshot"],
-            "generated_html": generated_html,
-            "reward": round(reward, 4),
-        })
-
-        log(f"  [{tag}] {i+1}/{len(samples)}: reward={reward:.3f}  ({os.path.basename(item['screenshot'])})")
-
-    return rewards, results
+    try:
+        if _is_full_html(html_snippet):
+            page.set_content(html_snippet)
+        else:
+            full_html = (
+                "<!DOCTYPE html>"
+                "<html><head><meta charset='utf-8'>"
+                "<style>body{margin:20px;background:#fff;}</style>"
+                "</head><body>"
+                f"{html_snippet}"
+                "</body></html>"
+            )
+            page.set_content(full_html)
+        page.wait_for_timeout(200)
+        page.screenshot(path=save_path)
+        return True
+    except Exception:
+        img = Image.new("RGB", (512, 512), (240, 240, 240))
+        img.save(save_path)
+        return False
 
 
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--n", type=int, default=10, help="Number of eval examples")
     parser.add_argument("--model_path", type=str, default=None,
-                        help="Tinker model path for RL weights (auto-detected from last training run)")
+                        help="Tinker model path for RL weights")
     parser.add_argument("--base_only", action="store_true", help="Only eval base model")
     parser.add_argument("--seed", type=int, default=42, help="Random seed")
     args = parser.parse_args()
@@ -141,24 +144,84 @@ def main():
     pw = sync_playwright().start()
     browser = pw.chromium.launch()
     reward_pages = [browser.new_page(viewport={"width": 512, "height": 512}) for _ in range(8)]
+    render_page = browser.new_page(viewport={"width": 512, "height": 512})
 
     out_dir = os.path.join(os.path.dirname(__file__), "eval_output")
     os.makedirs(out_dir, exist_ok=True)
 
     # Base model
-    log("\nEvaluating base model (untrained LoRA)...")
+    log("\nCreating base model (untrained LoRA)...")
     base_client = service_client.create_lora_training_client(base_model=MODEL, rank=LORA_RANK)
     base_sampler = base_client.save_weights_and_get_sampling_client()
-    base_rewards, base_results = eval_model("base", base_sampler, renderer, samples, eval_params, reward_pages)
 
     # RL model
-    rl_rewards, rl_results = None, None
+    rl_sampler = None
     if not args.base_only:
-        log(f"\nEvaluating RL model ({rl_model_path})...")
+        log(f"Loading RL model...")
         rl_sampler = service_client.create_sampling_client(model_path=rl_model_path)
-        rl_rewards, rl_results = eval_model("rl", rl_sampler, renderer, samples, eval_params, reward_pages)
 
-    # Summary
+    # Evaluate
+    base_rewards, rl_rewards = [], []
+
+    for i, item in enumerate(samples):
+        example_dir = os.path.join(out_dir, f"example_{i:02d}")
+        os.makedirs(example_dir, exist_ok=True)
+
+        screenshot_path = item["screenshot"]
+        ref_img = load_reference_image(screenshot_path, size=IMG_SIZE)
+        page = reward_pages[i % len(reward_pages)]
+        prompt = build_prompt(renderer, screenshot_path)
+
+        # Copy reference screenshot
+        shutil.copy2(screenshot_path, os.path.join(example_dir, "reference.png"))
+
+        # ── Base model ────────────────────────────────────────────────────
+        base_result = base_sampler.sample(prompt=prompt, num_samples=1, sampling_params=eval_params).result()
+        base_parsed, _ = renderer.parse_response(base_result.sequences[0].tokens)
+        base_html = extract_html_from_response(get_text_content(base_parsed))
+        base_reward = compute_visual_reward(base_html, ref_img, page)
+        base_rewards.append(base_reward)
+
+        # Save base HTML and render screenshot
+        with open(os.path.join(example_dir, "base.html"), "w") as f:
+            f.write(base_html or "<!-- No HTML generated -->")
+        render_html_to_screenshot(render_page, base_html, os.path.join(example_dir, "base.png"))
+
+        # ── RL model ──────────────────────────────────────────────────────
+        rl_reward = None
+        if rl_sampler is not None:
+            rl_result = rl_sampler.sample(prompt=prompt, num_samples=1, sampling_params=eval_params).result()
+            rl_parsed, _ = renderer.parse_response(rl_result.sequences[0].tokens)
+            rl_html = extract_html_from_response(get_text_content(rl_parsed))
+            rl_reward = compute_visual_reward(rl_html, ref_img, page)
+            rl_rewards.append(rl_reward)
+
+            with open(os.path.join(example_dir, "rl.html"), "w") as f:
+                f.write(rl_html or "<!-- No HTML generated -->")
+            render_html_to_screenshot(render_page, rl_html, os.path.join(example_dir, "rl.png"))
+
+        # Save metadata
+        meta = {
+            "screenshot": screenshot_path,
+            "ground_truth_html": item["html"],
+            "base_reward": round(base_reward, 4),
+        }
+        if rl_reward is not None:
+            meta["rl_reward"] = round(rl_reward, 4)
+            meta["delta"] = round(rl_reward - base_reward, 4)
+        with open(os.path.join(example_dir, "meta.json"), "w") as f:
+            json.dump(meta, f, indent=2)
+
+        # Log
+        if rl_reward is not None:
+            delta = rl_reward - base_reward
+            marker = ">" if delta > 0 else ("<" if delta < 0 else "=")
+            log(f"  {i+1}/{len(samples)}: base={base_reward:.3f} {marker} rl={rl_reward:.3f}  "
+                f"(delta={delta:+.3f})  {os.path.basename(screenshot_path)}")
+        else:
+            log(f"  {i+1}/{len(samples)}: base={base_reward:.3f}  {os.path.basename(screenshot_path)}")
+
+    # ── Summary ───────────────────────────────────────────────────────────
     log(f"\n{'='*60}")
     log("EVAL RESULTS")
     log(f"{'='*60}")
@@ -167,38 +230,32 @@ def main():
     log(f"  Base model:  mean={avg_base:.3f}  std={np.std(base_rewards):.3f}  "
         f"min={np.min(base_rewards):.3f}  max={np.max(base_rewards):.3f}")
 
-    if rl_rewards is not None:
+    summary = {
+        "base_mean": round(avg_base, 4),
+        "n_eval": len(samples),
+    }
+
+    if rl_rewards:
         avg_rl = float(np.mean(rl_rewards))
         wins = sum(1 for b, r in zip(base_rewards, rl_rewards) if r > b)
-        ties = sum(1 for b, r in zip(base_rewards, rl_rewards) if r == b)
 
         log(f"  RL model:    mean={avg_rl:.3f}  std={np.std(rl_rewards):.3f}  "
             f"min={np.min(rl_rewards):.3f}  max={np.max(rl_rewards):.3f}")
         log(f"  Improvement: {avg_rl - avg_base:+.3f}")
-        log(f"  RL wins: {wins}/{args.n}  ties: {ties}/{args.n}")
+        log(f"  RL wins: {wins}/{len(samples)}")
 
-        log(f"\n  Per-example:")
-        for i, (br, rr) in enumerate(zip(base_rewards, rl_rewards)):
-            marker = ">" if rr > br else ("<" if rr < br else "=")
-            log(f"    {i+1}: base={br:.3f}  {marker}  rl={rr:.3f}  (delta={rr-br:+.3f})")
-
-        # Save comparison
-        comparison = {
-            "base_mean": round(avg_base, 4),
+        summary.update({
             "rl_mean": round(avg_rl, 4),
             "improvement": round(avg_rl - avg_base, 4),
             "rl_wins": wins,
-            "n_eval": args.n,
             "rl_model_path": rl_model_path,
-            "per_example": [
-                {"base": round(b, 4), "rl": round(r, 4), "delta": round(r - b, 4)}
-                for b, r in zip(base_rewards, rl_rewards)
-            ],
-        }
-        with open(os.path.join(out_dir, "eval_comparison.json"), "w") as f:
-            json.dump(comparison, f, indent=2)
+        })
 
-    log(f"\nResults saved to {out_dir}/")
+    with open(os.path.join(out_dir, "eval_comparison.json"), "w") as f:
+        json.dump(summary, f, indent=2)
+
+    log(f"\nOutputs saved to {out_dir}/")
+    log(f"Each example_XX/ folder has: reference.png, base.png, base.html, rl.png, rl.html, meta.json")
 
     browser.close()
     pw.stop()
