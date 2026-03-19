@@ -1,0 +1,7 @@
+{
+  "screenshot": "/Users/justinwei/Desktop/coding_projects/prox/data/screenshots/0006.png",
+  "ground_truth_html": "<style>\n* {\n  box-sizing: border-box;\n  margin: 0;\n  padding: 0;\n}\n\nbody {\n  font-family: Arial, sans-serif;\n  line-height: 1.6;\n}\n\nheader {\n  background-color: #2a2a2a;\n  color: #fff;\n  padding: 10px;\n}\n\nnav a {\n  color: #fff;\n  text-decoration: none;\n  margin-right: 15px;\n}\n\nh1, p {\n  margin-bottom: 20px;\n}\n\n#courses {\n  background-color: #f4f4f4;\n  padding: 20px;\n}\n</style>\n<header>\n    <nav>\n      <a href=\"#home\">Home</a>\n      <a href=\"#courses\">Courses</a>\n      <!-- Add more navigation links as needed -->\n    </nav>\n  </header>\n  <main>\n    <section id=\"courses\">\n      <h1>Our Courses</h1>\n      <p>Welcome to our education website offering a wide range of courses. Feel free to explore and find the course that fits your needs.</p>\n      <!-- Courses will be displayed here -->\n    </section>\n  </main>",
+  "base_reward": 0.1878,
+  "rl_reward": 0.687,
+  "delta": 0.4992
+}

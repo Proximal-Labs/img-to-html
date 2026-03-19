@@ -1,0 +1,7 @@
+{
+  "screenshot": "/Users/justinwei/Desktop/coding_projects/prox/data/screenshots/0189.png",
+  "ground_truth_html": "<style>\nbody {\n    margin: 0;\n    padding: 0;\n    font-family: Arial, sans-serif;\n}\n\nnav {\n    background: #333;\n    color: #fff;\n    text-align: center;\n    padding: 10px;\n}\n\nnav a {\n    color: #fff;\n    text-decoration: none;\n    margin: 0 10px;\n}\n\n.hero {\n    background: url('hero.jpg');\n    color: #fff;\n    text-align: center;\n    padding: 50px;\n}\n\n.hero::before {\n    content: \"\";\n    background: red;\n    width: 200px;\n    height: 200px;\n    display: block;\n    margin: 0 auto;\n}\n\nfooter {\n    background: #333;\n    color: #fff;\n    text-align: center;\n    padding: 10px;\n}\n\nfooter a {\n    color: #fff;\n    text-decoration: none;\n    margin: 0 10px;\n}\n</style>\n<nav>\n            <a href=\"#packages\">Packages</a>\n            <a href=\"#tour\">Book a Tour</a>\n            <a href=\"#company\">About Company</a>\n        </nav>\n        <section class=\"hero\">\n            <h1>Welcome to our travel agency</h1>\n            <p>Discover the best places to visit with us.</p>\n            <a href=\"#packages\">Explore Packages</a>\n        </section>\n        <footer>\n            <a href=\"#blog\">Our Blog</a>\n            <a href=\"#contact\">Contact Us</a>\n        </footer>",
+  "base_reward": 0.2883,
+  "rl_reward": 0.536,
+  "delta": 0.2478
+}

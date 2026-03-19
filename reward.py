@@ -139,8 +139,8 @@ def compute_visual_reward(
     else:
         ssim_score = pixel_score
 
-    # Blend: weight MSE more since it's more sensitive
-    reward = 0.6 * pixel_score + 0.4 * ssim_score
+    # Blend: weight SSIM more since it better captures structural/perceptual similarity
+    reward = 0.2 * pixel_score + 0.8 * ssim_score
 
     # Scale to [-1, 1] range for better RL signal
     # 0.95+ -> near perfect, <0.5 -> quite wrong

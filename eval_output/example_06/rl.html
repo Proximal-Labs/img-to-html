@@ -1,0 +1,71 @@
+<style>
+  body {
+    font-family: Arial, sans-serif;
+    margin: 0;
+    padding: 20px;
+    background-color: #f0f0f0;
+  }
+  .header {
+    text-align: center;
+    margin-bottom: 20px;
+    color: #333;
+  }
+  .container {
+    display: flex;
+    gap: 20px;
+  }
+  .sidebar {
+    width: 250px;
+    background-color: #e0e0e0;
+    padding: 10px;
+    border-radius: 5px;
+  }
+  .content {
+    flex: 1;
+    background-color: #ffffff;
+    padding: 10px;
+    border-radius: 5px;
+  }
+  .section-title {
+    font-size: 1.5em;
+    margin-bottom: 10px;
+    color: #000000;
+  }
+  .list-item {
+    list-style-type: none;
+    padding: 5px 0;
+    color: #0000ff;
+    text-decoration: none;
+  }
+  .list-item:hover {
+    text-decoration: underline;
+  }
+</style>
+
+<div class="header">
+  Popular Songs Popular Artists Popular Albums
+</div>
+
+<div class="container">
+  <div class="sidebar">
+    <div class="section-title">Popular Songs</div>
+    <ul>
+      <li class="list-item">Song 1</li>
+      <li class="list-item">Song 2</li>
+      <li class="list-item">Song 3</li>
+    </ul>
+    <div class="section-title">Popular Artists</div>
+    <ul>
+      <li class="list-item">Artist 1</li>
+      <li class="list-item">Artist 2</li>
+      <li class="list-item">Artist 3</li>
+    </ul>
+    <div class="section-title">Popular Albums</div>
+    <ul>
+      <li class="list-item">Album 1</li>
+    </ul>
+  </div>
+  <div class="content">
+    <!-- Content area can be empty or filled with additional content -->
+  </div>
+</div>

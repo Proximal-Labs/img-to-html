@@ -1,0 +1,7 @@
+{
+  "screenshot": "/Users/justinwei/Desktop/coding_projects/prox/data/screenshots/0026.png",
+  "ground_truth_html": "<style>\nbody { \n  font-family: Arial, sans-serif; \n}\n.banner {\n  width: 100%; \n  height: 200px; \n  background: #f0f0f0; \n  text-align: center;\n}\n.header a {\n  font-size: 24px; \n  margin: 0 15px; \n  color: black;\n}\n.classes, .memberships, .training {\n  width: 100%; \n  height: 300px;\n}\n.footer {\n  width: 100%; \n  height: 100px; \n  position: absolute; \n  bottom: 0;\n}\n</style>\n<div class=\"banner\"></div>\n  <div class=\"header\">\n    <a href=\"#classes\">Classes</a>\n    <a href=\"#memberships\">Memberships</a>\n    <a href=\"#plans\">Training Plans</a>\n  </div>\n  <div class=\"classes\">\n    <p>Learn about our variety of fitness classes.</p>\n  </div>\n  <div class=\"memberships\">\n    <p>Choose from a selection of membership plans.</p>\n  </div>\n  <div class=\"training\">\n    <p>Create a personal workout plan.</p>\n  </div>\n  <div class=\"footer\">\n    <p>Contact us: 123-456-7890</p>\n    <p>&copy; 2022 Fitness Studio. All rights reserved.</p>\n  </div>",
+  "base_reward": 0.5521,
+  "rl_reward": 0.3181,
+  "delta": -0.234
+}
