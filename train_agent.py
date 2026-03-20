@@ -307,30 +307,7 @@ def main():
             ref_render = ref_renders[idx]
             page = reward_pages[idx % len(reward_pages)]
 
-            # Run GROUP_SIZE rollouts for this prompt
-            rewards_G = []
-            tokens_G = []
-            logprobs_G = []
-
-            for g in range(GROUP_SIZE):
-                all_tokens, all_logprobs, reward = run_agent_rollout(
-                    sampling_client, renderer, ref_pil, ref_info, ref_render, page, sampling_params,
-                )
-                tokens_G.append(all_tokens)
-                logprobs_G.append(all_logprobs)
-
-                kl = -sum(all_logprobs) / len(all_logprobs) if all_logprobs else 0.0
-                rewards_G.append(reward - KL_BETA * kl)
-                batch_kl.append(kl)
-
-            mean_reward = sum(rewards_G) / len(rewards_G)
-            advantages_G = [r - mean_reward for r in rewards_G]
-            batch_rewards.append(mean_reward)
-
-            if all(a == 0.0 for a in advantages_G):
-                continue
-
-            # Build training datums from the initial prompt + full trajectory
+            # Parallel turn 1: all GROUP_SIZE rollouts share the same initial prompt
             initial_prompt = renderer.build_generation_prompt([
                 {"role": "system", "content": SYSTEM_PROMPT_AGENT},
                 {
@@ -341,6 +318,125 @@ def main():
                     ],
                 },
             ])
+
+            # Fire all turn-1 samples in one call
+            turn1_result = sampling_client.sample(
+                prompt=initial_prompt, num_samples=GROUP_SIZE, sampling_params=sampling_params,
+            ).result()
+
+            # Process each rollout from turn 1, then continue individually for turns 2+
+            rewards_G = []
+            tokens_G = []
+            logprobs_G = []
+
+            for g, seq in enumerate(turn1_result.sequences):
+                all_tokens = list(seq.tokens)
+                all_logprobs = list(seq.logprobs)
+
+                # Parse turn 1 HTML
+                parsed_msg, _ = renderer.parse_response(seq.tokens)
+                content = get_text_content(parsed_msg)
+                current_html = extract_html_from_response(content)
+                final_reward = -1.0
+
+                if current_html is not None:
+                    try:
+                        gen_info = extract_gen_info(page, current_html, size=IMG_SIZE)
+                        final_reward, _ = compute_reward_from_info(ref_info, gen_info)
+                    except Exception:
+                        pass
+
+                # Continue with turns 2+ if needed
+                if current_html is not None and final_reward < 0.9:
+                    convo = [
+                        {"role": "system", "content": SYSTEM_PROMPT_AGENT},
+                        {"role": "user", "content": [
+                            {"type": "image", "image": ref_pil},
+                            {"type": "text", "text": "Generate the HTML/CSS that reproduces this screenshot."},
+                        ]},
+                    ]
+
+                    for turn in range(1, MAX_TURNS):
+                        # Create diff
+                        gen_render = render_html_to_image(page, current_html, size=max(VIEWPORT_W, VIEWPORT_H))
+                        diff_img = make_diff_image(ref_render, gen_render, threshold=25)
+                        diff_pil = Image.fromarray(diff_img)
+
+                        from skimage.metrics import structural_similarity as ssim_fn
+                        ssim_score = ssim_fn(ref_render, gen_render, channel_axis=2, data_range=255) if ref_render.shape == gen_render.shape else 0.0
+                        diff_mask = np.any(np.abs(ref_render.astype(int) - gen_render.astype(int)) > 25, axis=2)
+                        diff_pct = diff_mask.sum() / diff_mask.size
+
+                        # Analyze step
+                        convo.append({"role": "assistant", "content": content})
+                        convo.append({"role": "user", "content": [
+                            {"type": "image", "image": ref_pil},
+                            {"type": "image", "image": diff_pil},
+                            {"type": "text", "text": (
+                                f"Visual similarity: {ssim_score:.0%} ({diff_pct:.0%} of pixels differ).\n\n"
+                                f"Above: target screenshot and diff image (red = differences).\n\n"
+                                f"List the specific visual differences — wrong colors, missing elements, "
+                                f"incorrect sizing, layout issues. Be concise."
+                            )},
+                        ]})
+
+                        analyze_prompt = renderer.build_generation_prompt(convo)
+                        analyze_result = sampling_client.sample(
+                            prompt=analyze_prompt, num_samples=1, sampling_params=sampling_params,
+                        ).result()
+                        analyze_seq = analyze_result.sequences[0]
+                        all_tokens.extend(analyze_seq.tokens)
+                        all_logprobs.extend(analyze_seq.logprobs)
+
+                        analyze_msg, _ = renderer.parse_response(analyze_seq.tokens)
+                        analysis = get_text_content(analyze_msg)
+
+                        # Fix step
+                        convo.append({"role": "assistant", "content": analysis})
+                        convo.append({"role": "user", "content": (
+                            "Now fix ALL the issues you identified. "
+                            "Output the complete corrected HTML in ```html ... ```."
+                        )})
+
+                        fix_prompt = renderer.build_generation_prompt(convo)
+                        fix_result = sampling_client.sample(
+                            prompt=fix_prompt, num_samples=1, sampling_params=sampling_params,
+                        ).result()
+                        fix_seq = fix_result.sequences[0]
+                        all_tokens.extend(fix_seq.tokens)
+                        all_logprobs.extend(fix_seq.logprobs)
+
+                        parsed_msg, _ = renderer.parse_response(fix_seq.tokens)
+                        content = get_text_content(parsed_msg)
+                        current_html = extract_html_from_response(content)
+
+                        if current_html is None:
+                            break
+
+                        try:
+                            gen_info = extract_gen_info(page, current_html, size=IMG_SIZE)
+                            final_reward, _ = compute_reward_from_info(ref_info, gen_info)
+                        except Exception:
+                            final_reward = -1.0
+                            break
+
+                        if final_reward > 0.9:
+                            break
+
+                tokens_G.append(all_tokens)
+                logprobs_G.append(all_logprobs)
+                kl = -sum(all_logprobs) / len(all_logprobs) if all_logprobs else 0.0
+                rewards_G.append(final_reward - KL_BETA * kl)
+                batch_kl.append(kl)
+
+            mean_reward = sum(rewards_G) / len(rewards_G)
+            advantages_G = [r - mean_reward for r in rewards_G]
+            batch_rewards.append(mean_reward)
+
+            if all(a == 0.0 for a in advantages_G):
+                continue
+
+            # Build training datums (initial_prompt already built above)
 
             for tokens, logprobs, advantage in zip(tokens_G, logprobs_G, advantages_G):
                 if not tokens:
