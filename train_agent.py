@@ -54,13 +54,14 @@ SYSTEM_PROMPT_AGENT = (
     "You are an expert at converting screenshots of web pages into HTML/CSS code. "
     "You may use Tailwind CSS, inline styles, or a <style> block. "
     "Wrap your code in ```html ... ```.\n\n"
-    "You will get visual feedback showing red-highlighted regions where your output "
-    "differs from the target. Fix the red areas in each iteration."
+    "After each attempt, you will receive a diff image where red-highlighted regions "
+    "show where your output differs from the target. Use this feedback to improve "
+    "your output — fix the red areas and resubmit."
 )
 
 FEEDBACK_PROMPT = (
-    "The diff image above highlights differences in red between the target and your output. "
-    "Fix the red areas. Output the complete corrected HTML in ```html ... ```."
+    "Here is a visual diff — red areas show where your HTML differs from the target. "
+    "Please fix these differences and output the complete corrected HTML in ```html ... ```."
 )
 
 
