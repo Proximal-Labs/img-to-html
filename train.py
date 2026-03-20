@@ -60,8 +60,9 @@ def load_training_data() -> list[dict]:
     if os.path.exists(DESIGN2CODE_MANIFEST):
         d2c = load_dataset(DESIGN2CODE_MANIFEST)
         # Filter to pages the model can actually generate (~8K chars ≈ 4K tokens)
-        d2c = [x for x in d2c if len(x.get("html", "")) < 8000]
-        logger.info(f"  Design2Code: {len(d2c)} examples (filtered to <8K chars)")
+        from config import MAX_HTML_CHARS
+        d2c = [x for x in d2c if len(x.get("html", "")) < MAX_HTML_CHARS]
+        logger.info(f"  Design2Code: {len(d2c)} examples (filtered to <{MAX_HTML_CHARS} chars)")
         dataset.extend(d2c)
 
     # Curriculum: sort by HTML length (easy → hard)
@@ -104,9 +105,14 @@ def main():
 
     # Setup Tinker clients
     service_client = tinker.ServiceClient()
-    training_client = service_client.create_lora_training_client(
-        base_model=MODEL, rank=LORA_RANK,
-    )
+    resume_path = os.environ.get("RESUME_FROM")
+    if resume_path:
+        logger.info(f"Resuming from checkpoint: {resume_path}")
+        training_client = service_client.create_training_client_from_state_with_optimizer(resume_path)
+    else:
+        training_client = service_client.create_lora_training_client(
+            base_model=MODEL, rank=LORA_RANK,
+        )
 
     sampling_params = types.SamplingParams(
         max_tokens=MAX_TOKENS,
