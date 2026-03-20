@@ -88,6 +88,7 @@ def run_agent_rollout(
     renderer,
     ref_pil: Image.Image,
     ref_info: dict,
+    ref_render: np.ndarray,
     page,
     sampling_params,
 ) -> tuple[list[int], list[float], float]:
@@ -99,7 +100,6 @@ def run_agent_rollout(
     """
     all_tokens = []
     all_logprobs = []
-    ref_img = ref_info["image"]
 
     # Build initial prompt
     convo = [
@@ -150,9 +150,9 @@ def run_agent_rollout(
         if final_reward > 0.9 or turn == MAX_TURNS - 1:
             break
 
-        # Create diff image and add feedback for next turn
-        gen_img = gen_info["image"]
-        diff_img = make_diff_image(ref_img, gen_img, threshold=25)
+        # Create diff at viewport resolution (not tiny 256x256)
+        gen_render = render_html_to_image(page, current_html, size=max(VIEWPORT_W, VIEWPORT_H))
+        diff_img = make_diff_image(ref_render, gen_render, threshold=25)
         diff_pil = Image.fromarray(diff_img)
 
         # Add the model's response and feedback to conversation
@@ -220,15 +220,19 @@ def main():
 
         sampling_client = training_client.save_weights_and_get_sampling_client()
 
-        # Pre-extract reference info
+        # Pre-extract reference info + viewport-sized render for diffs
         ref_infos = []
         ref_pils = []
+        ref_renders = []
         for i, item in enumerate(batch):
             page = reward_pages[i % len(reward_pages)]
             ref_html = item.get("reference_html") or item["html"]
             ref_info = extract_ref_info(page, ref_html, size=IMG_SIZE)
             ref_infos.append(ref_info)
-            ref_pils.append(Image.fromarray(ref_info["image"]).resize((VIEWPORT_W, VIEWPORT_H)))
+            # Viewport-sized render for model input + diff feedback
+            ref_render = render_html_to_image(page, ref_html, size=max(VIEWPORT_W, VIEWPORT_H))
+            ref_renders.append(ref_render)
+            ref_pils.append(Image.fromarray(ref_render))
 
         # Run multi-turn rollouts
         datums: list[types.Datum] = []
@@ -238,6 +242,7 @@ def main():
         for idx in tqdm(range(len(batch)), desc=f"Batch {batch_idx}"):
             ref_info = ref_infos[idx]
             ref_pil = ref_pils[idx]
+            ref_render = ref_renders[idx]
             page = reward_pages[idx % len(reward_pages)]
 
             # Run GROUP_SIZE rollouts for this prompt
@@ -247,7 +252,7 @@ def main():
 
             for g in range(GROUP_SIZE):
                 all_tokens, all_logprobs, reward = run_agent_rollout(
-                    sampling_client, renderer, ref_pil, ref_info, page, sampling_params,
+                    sampling_client, renderer, ref_pil, ref_info, ref_render, page, sampling_params,
                 )
                 tokens_G.append(all_tokens)
                 logprobs_G.append(all_logprobs)
