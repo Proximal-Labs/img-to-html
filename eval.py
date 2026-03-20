@@ -94,6 +94,16 @@ def main():
 
     service_client = tinker.ServiceClient()
 
+    # Create Tinker clients BEFORE Playwright (avoids async context warning)
+    log("\nCreating base model (untrained LoRA)...")
+    base_client = service_client.create_lora_training_client(base_model=MODEL, rank=LORA_RANK)
+    base_sampler = base_client.save_weights_and_get_sampling_client()
+
+    rl_sampler = None
+    if not args.base_only:
+        log("Loading RL model...")
+        rl_sampler = service_client.create_sampling_client(model_path=rl_model_path)
+
     pw = sync_playwright().start()
     browser = pw.chromium.launch()
     reward_pages = [browser.new_page(viewport={"width": VIEWPORT_W, "height": VIEWPORT_H}) for _ in range(8)]
@@ -105,16 +115,6 @@ def main():
     eval_dir = os.path.join(EVAL_DIR, eval_name)
     os.makedirs(eval_dir, exist_ok=True)
     log(f"Eval output dir: {eval_dir}")
-
-    # Models
-    log("\nCreating base model (untrained LoRA)...")
-    base_client = service_client.create_lora_training_client(base_model=MODEL, rank=LORA_RANK)
-    base_sampler = base_client.save_weights_and_get_sampling_client()
-
-    rl_sampler = None
-    if not args.base_only:
-        log("Loading RL model...")
-        rl_sampler = service_client.create_sampling_client(model_path=rl_model_path)
 
     # Evaluate
     base_rewards, rl_rewards = [], []

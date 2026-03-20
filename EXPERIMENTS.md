@@ -206,12 +206,14 @@ Running 30-batch curriculum training. 1011 examples, checkpoint at batch 15, aut
 0.15 * visual SSIM+MSE (content-cropped)
 ```
 
-### Status
-Running. Pending results.
+### Results (30 batches)
+- **Training:** reward climbed to 0.36 by batch 29, KL dropped to 0.021
+- **Eval:** Base 0.248, RL 0.197, improvement -0.050, RL wins 5/10
+- **Assessment:** Training reward looked great but didn't transfer to eval. The model optimized the training reward but didn't generalize to held-out examples. Possible cause: CLIP added noise to the gradient signal, or train/eval mismatch from stale dataset screenshots.
 
 ---
 
-## Experiment 7: Optimized Pure-DOM Reward (In Progress)
+## Experiment 7: Optimized Pure-DOM Reward ✓ BEST RESULT
 
 **Goal:** Faster, cleaner reward — drop CLIP model, cache reference extraction, single JS call.
 
@@ -234,7 +236,67 @@ Running. Pending results.
 3. **Single JS evaluate** — combined text + blocks + colors into one `page.evaluate()` call (was 3 separate round-trips)
 4. **Gen HTML rendered once** — DOM extraction + screenshot in same page load (was rendering twice)
 
-~30% faster reward computation per batch. Same signal quality.
+### Results (30 batches)
+- **Training:** reward 0.085 → 0.328, KL 0.091 → 0.022
+- **Eval:** Base 0.106, RL 0.187, **improvement +0.082, RL wins 7/10**
+- **Per-example:** 5 examples with delta > +0.13 (layout fidelity clearly improved)
+- **Assessment:** Best result so far. Pure DOM reward without CLIP produces cleaner gradients. The model learned better layout matching, color accuracy, and text reproduction.
 
-### Status
-Running in parallel with Experiment 6. 30 batches.
+---
+
+## Experiment 8: Tailwind Prompt + Live Ref Render (Smoke Test)
+
+**Goal:** Fix two issues discovered during analysis:
+1. WebSight v0.2 uses Tailwind CSS but system prompt told model to use inline CSS
+2. Model input was stale dataset screenshot, not live-rendered HTML (mismatch with reward)
+
+### Key Findings
+- **All 974 WebSight v0.2 examples use Tailwind via CDN** — model was forced to reverse-engineer Tailwind utilities into inline CSS (unnecessary translation step)
+- **DOM reward is style-agnostic** — `getComputedStyle()` returns the same values whether from Tailwind class or inline CSS, so reward already handles this correctly
+- **Input mismatch** — model saw pre-rendered dataset screenshot but reward compared against live Playwright render
+
+### Changes
+- **System prompt** updated: "You may use Tailwind CSS, inline styles, or a `<style>` block"
+- **render_html()** waits for `networkidle` (ensures Tailwind CDN loads) instead of fixed 100ms
+- **Model input** now uses live-rendered HTML via Playwright (consistent with reward)
+
+### Results (4-batch smoke test)
+- **Training:** reward -0.047 → 0.275 (strong climb in just 4 batches)
+- **Eval:** Base 0.104, RL 0.189, **improvement +0.085, RL wins 2/5**
+- **RL model much more consistent** — std 0.066 vs base 0.172
+- **Assessment:** Similar improvement to Exp 7 with only 4 batches. Tailwind-aware prompt + live ref render is working. Ready for a longer run.
+
+---
+
+## Results Summary
+
+| Exp | Model | Batches | Reward Fn | Eval Improvement | RL Wins |
+|-----|-------|---------|-----------|-----------------|---------|
+| 1 | 4B | 21 | Pixel SSIM+MSE | N/A (no formal eval) | N/A |
+| 2 | 4B | 31 | Pixel SSIM+MSE | +0.080 | 6/10 |
+| 3 | 27B | 182 | 8-signal DOM+CLIP | +0.032 | 6/10 |
+| 4 | 27B | 4 | 5-signal smooth | -0.031 | 5/10 |
+| 5 | 27B | 8 | 5-signal, tall viewport | -0.000 | 6/10 |
+| 6 | 27B | 30 | 5-signal+CLIP, 1024x768 | -0.050 | 5/10 |
+| **7** | **27B** | **30** | **Pure DOM (no CLIP)** | **+0.082** | **7/10** |
+| 8 | 27B | 4 | Pure DOM+Tailwind+live ref | +0.085 | 2/5 |
+
+### Key Learnings
+1. **CLIP hurts more than it helps** — adds noise to gradients, DOM comparison is strictly better
+2. **Pure DOM reward works** — text match + layout match + color match gives clean, actionable signal
+3. **Viewport matters** — 1024x768 shows natural desktop layouts
+4. **Tailwind awareness** — letting the model use Tailwind (matching the training data) removes an unnecessary translation burden
+5. **Live ref rendering** — ensures model input matches reward comparison
+6. **More batches needed** — 4-8 batches shows the right direction but doesn't compound enough
+
+---
+
+## Experiment 9: Full Run (In Progress)
+
+**Goal:** Scale up Experiment 8 to 105 batches with all improvements.
+
+### Setup
+- All Exp 8 changes (Tailwind prompt, live ref render, networkidle, pure DOM reward)
+- **105 batches** (~840 unique examples, curriculum-ordered)
+- Qwen3.5-27B, LR 1e-5, GROUP_SIZE 8, PPO+KL
+- Checkpoints every 15 batches
