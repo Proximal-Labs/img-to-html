@@ -21,6 +21,7 @@ import argparse
 import base64
 import io
 import json
+
 import os
 import random
 
@@ -43,6 +44,12 @@ from train_agent import SYSTEM_PROMPT_AGENT, make_feedback_prompt
 
 def log(msg):
     print(msg, flush=True)
+
+
+def _viewport_screenshot(page, html: str) -> np.ndarray:
+    """Render HTML and take a viewport-sized screenshot (e.g. 1024x768)."""
+    render_html(page, html)
+    return np.array(Image.open(io.BytesIO(page.screenshot())).convert("RGB"))
 
 
 def pil_to_base64(img: Image.Image) -> str:
@@ -99,7 +106,7 @@ def run_openai_agent(
         try:
             gen_info = extract_gen_info(page, html, size=IMG_SIZE)
             reward, details = compute_reward_from_info(ref_info, gen_info)
-            gen_render = render_html_to_image(page, html, size=max(VIEWPORT_W, VIEWPORT_H))
+            gen_render = _viewport_screenshot(page, html)
 
             if ref_render.shape == gen_render.shape:
                 ssim_score = ssim_fn(ref_render, gen_render, channel_axis=2, data_range=255)
@@ -184,7 +191,7 @@ def run_tinker_agent(
         try:
             gen_info = extract_gen_info(page, html, size=IMG_SIZE)
             reward, details = compute_reward_from_info(ref_info, gen_info)
-            gen_render = render_html_to_image(page, html, size=max(VIEWPORT_W, VIEWPORT_H))
+            gen_render = _viewport_screenshot(page, html)
 
             if ref_render.shape == gen_render.shape:
                 ssim_score = ssim_fn(ref_render, gen_render, channel_axis=2, data_range=255)
@@ -304,11 +311,14 @@ def main():
 
         ref_html = item.get("reference_html") or item["html"]
         ref_info = extract_ref_info(page, ref_html, size=IMG_SIZE)
-        ref_render = render_html_to_image(page, ref_html, size=max(VIEWPORT_W, VIEWPORT_H))
+
+        # Viewport-sized screenshot (1024x768, not square)
+        render_html(page, ref_html)
+        ref_render = np.array(Image.open(io.BytesIO(page.screenshot())).convert("RGB"))
         ref_pil = Image.fromarray(ref_render)
 
-        ref_pil.save(os.path.join(ex_dir, "reference.png"))
-        render_html_to_file(page, ref_html, os.path.join(ex_dir, "ref-render.png"))
+        ref_pil.save(os.path.join(ex_dir, "ref-render.png"))
+        # ref-render.png IS the model input now
 
         log(f"\nExample {i+1}/{args.n} ({len(ref_html)} chars)")
 
