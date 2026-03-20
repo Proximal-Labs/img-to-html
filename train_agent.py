@@ -77,15 +77,37 @@ def load_dataset(manifest_path: str) -> list[dict]:
 
 
 def load_training_data() -> list[dict]:
-    dataset = load_dataset(MANIFEST_PATH)
-    logger.info(f"  WebSight: {len(dataset)} examples")
+    """Load structured training split: basic + medium + hard WebSight + D2C."""
+    n_basic = int(os.environ.get("N_BASIC", 16))
+    n_medium = int(os.environ.get("N_MEDIUM", 100))
+    n_hard = int(os.environ.get("N_HARD", 32))
+    n_d2c = int(os.environ.get("N_D2C", 16))
+
+    ws = load_dataset(MANIFEST_PATH)
+    basic = [x for x in ws if len(x.get("html", "")) < 800]
+    medium = [x for x in ws if 800 <= len(x.get("html", "")) < 1500]
+    hard = [x for x in ws if len(x.get("html", "")) >= 1500]
+
+    random.shuffle(basic)
+    random.shuffle(medium)
+    random.shuffle(hard)
+
+    dataset = basic[:n_basic] + medium[:n_medium] + hard[:n_hard]
+    logger.info(f"  WebSight: {min(n_basic, len(basic))} basic, "
+                f"{min(n_medium, len(medium))} medium, {min(n_hard, len(hard))} hard")
+
     if os.path.exists(DESIGN2CODE_MANIFEST):
         from config import MAX_HTML_CHARS
         d2c = load_dataset(DESIGN2CODE_MANIFEST)
         d2c = [x for x in d2c if len(x.get("html", "")) < MAX_HTML_CHARS]
-        logger.info(f"  Design2Code: {len(d2c)} examples (filtered)")
-        dataset.extend(d2c)
+        random.shuffle(d2c)
+        d2c_sample = d2c[:n_d2c]
+        dataset.extend(d2c_sample)
+        logger.info(f"  Design2Code: {len(d2c_sample)}")
+
+    # Curriculum: sort by HTML length
     dataset.sort(key=lambda x: len(x.get("html", "")))
+    logger.info(f"  Total: {len(dataset)} examples")
     return dataset
 
 
@@ -170,17 +192,40 @@ def run_agent_rollout(
         diff_mask = np.any(np.abs(ref_render.astype(int) - gen_render.astype(int)) > 25, axis=2)
         diff_pct = diff_mask.sum() / diff_mask.size
 
-        feedback = make_feedback_prompt(ssim_score, diff_pct)
-
-        # Add the model's response and feedback to conversation
+        # Step 1: Show diff + ref, ask model to ANALYZE
         convo.append({"role": "assistant", "content": content})
         convo.append({
             "role": "user",
             "content": [
+                {"type": "image", "image": ref_pil},
                 {"type": "image", "image": diff_pil},
-                {"type": "text", "text": feedback},
+                {"type": "text", "text": (
+                    f"Visual similarity: {ssim_score:.0%} ({diff_pct:.0%} of pixels differ).\n\n"
+                    f"Above: target screenshot and diff image (red = differences).\n\n"
+                    f"List the specific visual differences — wrong colors, missing elements, "
+                    f"incorrect sizing, layout issues. Be concise."
+                )},
             ],
         })
+
+        # Sample analysis
+        analyze_prompt = renderer.build_generation_prompt(convo)
+        analyze_result = sampling_client.sample(
+            prompt=analyze_prompt, num_samples=1, sampling_params=sampling_params,
+        ).result()
+        analyze_seq = analyze_result.sequences[0]
+        all_tokens.extend(analyze_seq.tokens)
+        all_logprobs.extend(analyze_seq.logprobs)
+
+        analyze_msg, _ = renderer.parse_response(analyze_seq.tokens)
+        analysis = get_text_content(analyze_msg)
+
+        # Step 2: Ask model to FIX
+        convo.append({"role": "assistant", "content": analysis})
+        convo.append({"role": "user", "content": (
+            "Now fix ALL the issues you identified. "
+            "Output the complete corrected HTML in ```html ... ```."
+        )})
 
     return all_tokens, all_logprobs, final_reward
 
