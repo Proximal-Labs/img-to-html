@@ -97,13 +97,12 @@ def load_training_data() -> list[dict]:
                 f"{min(n_medium, len(medium))} medium, {min(n_hard, len(hard))} hard")
 
     if os.path.exists(DESIGN2CODE_MANIFEST):
-        from config import MAX_HTML_CHARS
         d2c = load_dataset(DESIGN2CODE_MANIFEST)
-        d2c = [x for x in d2c if len(x.get("html", "")) < MAX_HTML_CHARS]
+        # No length filter — model generates short HTML regardless of source length
         random.shuffle(d2c)
         d2c_sample = d2c[:n_d2c]
         dataset.extend(d2c_sample)
-        logger.info(f"  Design2Code: {len(d2c_sample)}")
+        logger.info(f"  Design2Code: {len(d2c_sample)} (of {len(d2c)} available)")
 
     # Curriculum: sort by HTML length
     dataset.sort(key=lambda x: len(x.get("html", "")))
