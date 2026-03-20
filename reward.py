@@ -473,29 +473,23 @@ def visual_similarity(ref_img: np.ndarray, gen_img: np.ndarray) -> float:
 
 # ── Combined reward ──────────────────────────────────────────────────────────
 
-WEIGHTS = {
-    "text": 0.20,          # global text content match
-    "styled_text": 0.15,   # text + font size/weight/color match
-    "layout": 0.25,        # element sizes + relative ordering
-    "color": 0.20,         # color palette
-    "visual": 0.20,        # pixel SSIM
-}
-
-
 def compute_reward_from_info(ref_info: dict, gen_info: dict) -> tuple[float, dict]:
     """
-    Compute reward from pre-extracted DOM info.
-    Both ref_info and gen_info come from extract_dom_info / extract_ref_info.
+    Compute reward: SSIM-anchored with text and color bonuses.
+
+    If it looks right visually (SSIM), it IS right. DOM signals are
+    bonuses for text accuracy and color fidelity, not vetoes.
     """
     details = {
+        "ssim": visual_similarity(ref_info["image"], gen_info["image"]),
         "text": text_similarity(ref_info["text"], gen_info["text"]),
-        "styled_text": styled_text_score(ref_info["blocks"], gen_info["blocks"]),
-        "layout": layout_score(ref_info["blocks"], gen_info["blocks"]),
         "color": color_palette_similarity(ref_info["colors"], gen_info["colors"]),
-        "visual": visual_similarity(ref_info["image"], gen_info["image"]),
     }
 
-    raw = sum(WEIGHTS[k] * details[k] for k in WEIGHTS)
+    # 0.60 SSIM + 0.25 text + 0.15 color
+    raw = 0.60 * details["ssim"] + 0.25 * details["text"] + 0.15 * details["color"]
+
+    # Scale to [-1, 1]
     reward = 2.0 * raw - 1.0
 
     return float(reward), details
