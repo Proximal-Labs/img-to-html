@@ -128,20 +128,84 @@ def load_mind2web_tasks(n: int, seed: int = 42) -> list[dict]:
     return selected
 
 
+MAX_FLOW_IMAGES = 5  # Max screenshots to show from the action flow
+
+
+def build_flow_prompt_content(actions: list[dict], provider: str) -> list:
+    """Build interleaved screenshot + action description content."""
+    content = []
+    content.append({"type": "text", "text": (
+        "Here is a website user flow. Generate HTML/CSS/JS that reproduces "
+        "this page with all the interactions working.\n"
+    )})
+
+    # Select up to MAX_FLOW_IMAGES steps (always include first, evenly sample rest)
+    steps_with_screenshots = [(i, a) for i, a in enumerate(actions) if a.get("screenshot")]
+    if len(steps_with_screenshots) > MAX_FLOW_IMAGES:
+        # Always include first and last, sample middle
+        selected = [steps_with_screenshots[0]]
+        middle = steps_with_screenshots[1:-1]
+        step_size = max(1, len(middle) // (MAX_FLOW_IMAGES - 2))
+        selected.extend(middle[::step_size][:MAX_FLOW_IMAGES - 2])
+        selected.append(steps_with_screenshots[-1])
+    else:
+        selected = steps_with_screenshots
+
+    for j, (idx, action) in enumerate(selected):
+        # Action description
+        op = action["op"]
+        desc = action["repr"]
+        if j == 0:
+            step_text = f"\nStep {j+1} — Initial page load:"
+        else:
+            step_text = f"\nStep {j+1} — {desc} ({op}):"
+
+        content.append({"type": "text", "text": step_text})
+
+        # Screenshot
+        screenshot = action["screenshot"]
+        if provider == "openai":
+            img_b64 = pil_to_base64(screenshot.resize((1280, 720)))
+            content.append({"type": "image_url", "image_url": {"url": f"data:image/png;base64,{img_b64}"}})
+        else:
+            content.append({"type": "image", "image": screenshot.resize((1280, 720))})
+
+    content.append({"type": "text", "text": (
+        "\n\nGenerate complete HTML/CSS that reproduces this page. "
+        "Include JavaScript for the interactions shown above (clicks, navigation, dropdowns). "
+        "Wrap your code in ```html ... ```."
+    )})
+
+    return content
+
+
 def run_agent_generate(
     provider, client_or_sampler, renderer, ref_pil, page, max_turns,
-    sampling_params=None, openai_model=None,
+    sampling_params=None, openai_model=None, actions=None,
 ) -> str | None:
-    """Run multi-turn agent to generate HTML from screenshot."""
+    """Run multi-turn agent to generate HTML from screenshots + action flow."""
     ref_b64 = pil_to_base64(ref_pil) if provider == "openai" else None
+
+    # Build initial prompt with flow screenshots
+    if actions and len([a for a in actions if a.get("screenshot")]) > 1:
+        user_content = build_flow_prompt_content(actions, provider)
+    else:
+        # Fallback: single screenshot
+        if provider == "openai":
+            user_content = [
+                {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{ref_b64}"}},
+                {"type": "text", "text": "Generate the HTML/CSS that reproduces this screenshot. The page should be interactive — buttons and links should be clickable elements."},
+            ]
+        else:
+            user_content = [
+                {"type": "image", "image": ref_pil},
+                {"type": "text", "text": "Generate the HTML/CSS that reproduces this screenshot. The page should be interactive — buttons and links should be clickable elements."},
+            ]
 
     if provider == "openai":
         messages = [
             {"role": "system", "content": SYSTEM_PROMPT_AGENT},
-            {"role": "user", "content": [
-                {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{ref_b64}"}},
-                {"type": "text", "text": "Generate the HTML/CSS that reproduces this screenshot. The page should be interactive — buttons and links should be clickable elements."},
-            ]},
+            {"role": "user", "content": user_content},
         ]
 
         current_html = None
@@ -195,10 +259,7 @@ def run_agent_generate(
         from tinker_cookbook.renderers import get_text_content
         convo = [
             {"role": "system", "content": SYSTEM_PROMPT_AGENT},
-            {"role": "user", "content": [
-                {"type": "image", "image": ref_pil},
-                {"type": "text", "text": "Generate the HTML/CSS that reproduces this screenshot. The page should be interactive — buttons and links should be clickable elements."},
-            ]},
+            {"role": "user", "content": user_content},
         ]
 
         current_html = None
@@ -381,7 +442,7 @@ def main():
         log("  Generating HTML...")
         gen_html = run_agent_generate(
             args.provider, client_or_sampler, renderer, ref_pil, page,
-            args.turns, sampling_params, openai_model,
+            args.turns, sampling_params, openai_model, actions=task["actions"],
         )
 
         if gen_html is None:
