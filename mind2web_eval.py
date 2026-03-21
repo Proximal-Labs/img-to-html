@@ -202,7 +202,49 @@ def run_agent_generate(
                 {"type": "text", "text": "Generate the HTML/CSS that reproduces this screenshot. The page should be interactive — buttons and links should be clickable elements."},
             ]
 
-    if provider == "openai":
+    if provider in ("openai", "anthropic"):
+
+        def _convert_content_for_anthropic(content_list):
+            """Convert OpenAI-style content to Anthropic format."""
+            result = []
+            for item in content_list:
+                if item.get("type") == "text":
+                    result.append({"type": "text", "text": item["text"]})
+                elif item.get("type") == "image_url":
+                    # Extract base64 from data URL
+                    url = item["image_url"]["url"]
+                    if url.startswith("data:image/png;base64,"):
+                        b64 = url.split(",", 1)[1]
+                        result.append({
+                            "type": "image",
+                            "source": {"type": "base64", "media_type": "image/png", "data": b64},
+                        })
+            return result
+
+        def _chat(msgs, max_tokens=32768):
+            if provider == "openai":
+                resp = client_or_sampler.chat.completions.create(
+                    model=openai_model, messages=msgs, max_completion_tokens=max_tokens, temperature=0.3,
+                )
+                return resp.choices[0].message.content
+            else:
+                # Anthropic: system is separate, convert content format
+                system = ""
+                api_msgs = []
+                for m in msgs:
+                    if m["role"] == "system":
+                        system = m["content"] if isinstance(m["content"], str) else m["content"]
+                    else:
+                        content = m["content"]
+                        if isinstance(content, list):
+                            content = _convert_content_for_anthropic(content)
+                        api_msgs.append({"role": m["role"], "content": content})
+                resp = client_or_sampler.messages.create(
+                    model=openai_model, system=system, messages=api_msgs,
+                    max_tokens=max_tokens, temperature=0.3,
+                )
+                return resp.content[0].text
+
         messages = [
             {"role": "system", "content": SYSTEM_PROMPT_AGENT},
             {"role": "user", "content": user_content},
@@ -210,10 +252,7 @@ def run_agent_generate(
 
         current_html = None
         for turn in range(max_turns):
-            response = client_or_sampler.chat.completions.create(
-                model=openai_model, messages=messages, max_completion_tokens=32768, temperature=0.3,
-            )
-            content = response.choices[0].message.content
+            content = _chat(messages)
             current_html = extract_html_from_response(content)
 
             if current_html is None or turn == max_turns - 1:
@@ -282,10 +321,7 @@ def run_agent_generate(
             # Analyze
             messages.append({"role": "assistant", "content": content})
             messages.append({"role": "user", "content": feedback_content})
-            analysis_resp = client_or_sampler.chat.completions.create(
-                model=openai_model, messages=messages, max_completion_tokens=2048, temperature=0.3,
-            )
-            analysis = analysis_resp.choices[0].message.content
+            analysis = _chat(messages, max_tokens=2048)
             messages.append({"role": "assistant", "content": analysis})
             messages.append({"role": "user", "content": "Fix ALL issues. Output complete corrected HTML in ```html ... ```."})
 
@@ -413,8 +449,9 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--n", type=int, default=3, help="Number of tasks")
     parser.add_argument("--turns", type=int, default=2, help="Agent turns for HTML generation")
-    parser.add_argument("--provider", type=str, default="openai", choices=["openai", "tinker"])
+    parser.add_argument("--provider", type=str, default="openai", choices=["openai", "anthropic", "tinker"])
     parser.add_argument("--openai_model", type=str, default="gpt-5.4-2026-03-05")
+    parser.add_argument("--anthropic_model", type=str, default="claude-sonnet-4-6")
     parser.add_argument("--model_path", type=str, default=None)
     parser.add_argument("--name", type=str, default=None)
     parser.add_argument("--seed", type=int, default=42)
@@ -443,6 +480,10 @@ def main():
         from openai import OpenAI
         client_or_sampler = OpenAI()
         openai_model = args.openai_model
+    elif args.provider == "anthropic":
+        import anthropic
+        client_or_sampler = anthropic.Anthropic()
+        openai_model = args.anthropic_model  # reuse the variable for model name
     else:
         import tinker
         from tinker import types
