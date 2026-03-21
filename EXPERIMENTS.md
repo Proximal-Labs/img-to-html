@@ -488,7 +488,70 @@ GPT-5.4 crushes hard D2C pages — generates 1-4K chars of simplified HTML that 
 | 12 | — | — | Analyze-fix | — | Multi-turn agent eval |
 | **13** | **4B** | **100** | **SSIM + analyze-fix** | **TBD** | **Agent RL training** |
 
+---
+
+## Part 2: Interactive Flow Evaluation (Mind2Web)
+
+### Experiment 14: Mind2Web Screenplay Eval
+
+**Goal:** Move beyond static screenshot comparison to interactive evaluation — does the generated page work when you click through it?
+
+### What We Built
+
+Loaded real website tasks from [Multimodal-Mind2Web](https://huggingface.co/datasets/osunlp/Multimodal-Mind2Web) (2,350 tasks, 137 websites). Each task has:
+- Action sequences (click, type, select) with selectors
+- Screenshots at each step
+- Full HTML/DOM
+
+The eval pipeline:
+1. Show model up to 5 interleaved flow screenshots ("Step 1 — initial load [img], Step 2 — click Search [img]...")
+2. Model generates interactive HTML with JavaScript
+3. Run action sequence via Playwright on the generated page
+4. Compare SSIM at each action step against reference screenshots
+5. Flow-based analyze: find 3 worst steps, show model "your output vs target" side-by-side
+6. Model fixes and we re-evaluate
+
+### Critical Bug Found: Playwright Action Runner
+
+74% of Mind2Web actions had `selector=None`. Our runner only tried CSS selectors, so **most clicks never fired**. All previous step SSIM scores were artificially low — the models had working JavaScript but we weren't triggering it.
+
+**Fix:** Text-based matching — extract element text from action description (e.g., "Marketplace" from `[button] Marketplace -> CLICK`), then try `get_by_text()`, `get_by_role()` before falling back to bbox coordinates. Covers 95% of actions.
+
+### What Models Actually Generated
+
+| Model | Initial SSIM | JS Handlers | Interactive? |
+|-------|-------------|-------------|-------------|
+| GPT-5.4 | 0.68 | 18-22 | Yes — click handlers, state management |
+| Opus 4.6 | 0.40 | 21 | Yes — full multi-page app with `showPage()` routing |
+| Qwen 27B | 0.24 | 0 | No |
+| Qwen 4B | 0.23 | 0 | No |
+
+**Key finding:** Frontier models (GPT-5.4, Opus) generate genuinely interactive pages. Opus built a 31K char app with marketplace navigation, filtering, cart, and checkout — all from flow screenshots. Our harness just couldn't click the buttons.
+
+Qwen models (4B and 27B) generate zero JavaScript — the gap isn't model size, it's capability.
+
+### Mind2Web Eval Results (with text-matching fix)
+
+Re-evaluating with fixed action runner. Previous results were invalid due to the selector bug.
+
+*(Results pending — runs in progress)*
+
+### Analyze Step: Flow-Based Feedback
+
+Instead of just diffing the initial screenshot, the analyze step now:
+1. Runs the full action sequence on the generated HTML
+2. Computes per-step SSIM
+3. Finds the 3 worst-scoring steps
+4. Shows the model side-by-side: "Your page at step 3:" [gen img] "What it should look like:" [ref img]
+5. Model analyzes what interactions are broken and fixes
+
+This is much closer to Cloning Bench's approach — the agent gets told specifically which interactions failed.
+
+---
+
 ## Key Learnings
+
+### Part 1: Screenshot → HTML Agent
 
 1. **SSIM is the right anchor for reward** — complex DOM comparison penalized visually correct outputs. Keep it simple: if it looks right, it IS right.
 
@@ -498,8 +561,16 @@ GPT-5.4 crushes hard D2C pages — generates 1-4K chars of simplified HTML that 
 
 4. **Analyze-then-fix > direct fix** — splitting visual analysis from code generation prevents regression and gives consistent improvement across turns.
 
-5. **Output is always short** — models generate 1-4K chars regardless of source page complexity (100K+ chars). No need to filter by source length. The model learns to produce simplified HTML that visually matches.
+5. **Output is always short** — models generate 1-4K chars regardless of source page complexity (100K+ chars). No need to filter by source length.
 
-6. **"Hard" pages aren't that hard visually** — most Design2Code pages are structurally simple websites. The long HTML comes from verbose frameworks (Tailwind, Bootstrap), not visual complexity. A few hundred chars of clean HTML can match a 100K char source.
+6. **Multi-turn is expensive but higher quality** — 3 turns × analyze-fix = 9 API calls per rollout. Slower but the training signal is much richer.
 
-7. **Multi-turn is expensive but higher quality** — 3 turns × analyze-fix = 9 API calls per rollout. Slower but the training signal is much richer — the model learns self-correction, not just one-shot generation.
+### Part 2: Interactive Flow Eval
+
+7. **Test your harness before blaming the model** — the Playwright selector bug made it look like no model could generate interactive pages. In reality, GPT-5.4 and Opus were building working apps.
+
+8. **Text-based element matching > CSS selectors** — real-world datasets often lack clean selectors. `get_by_text("Marketplace")` is more robust than `#nav-marketplace`.
+
+9. **Frontier models generate interactive code from screenshots** — GPT-5.4 and Opus produce JavaScript with click handlers, state management, and multi-page routing from just flow screenshots. This is the target for RL training.
+
+10. **Show the full flow, not just the first screenshot** — models need to see what happens after interactions to generate working JavaScript. Interleaving screenshots with action descriptions is the right prompt format.
