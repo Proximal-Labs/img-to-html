@@ -219,34 +219,62 @@ def run_agent_generate(
             if current_html is None or turn == max_turns - 1:
                 break
 
-            # Render and diff
+            # Run the action sequence on generated HTML and find failures
+            render_html(page, current_html)
+            page.wait_for_timeout(500)
+            step_results = run_action_sequence(page, actions, out_dir=None)
+
+            # Initial state diff
             render_html(page, current_html)
             gen_img = take_screenshot(page)
             ref_arr = np.array(ref_pil)
             if ref_arr.shape != gen_img.shape:
                 ref_arr = np.array(ref_pil.resize((gen_img.shape[1], gen_img.shape[0])))
+            initial_ssim = compute_ssim(ref_arr, gen_img)
 
-            ssim_score = compute_ssim(ref_arr, gen_img)
-            if ssim_score > 0.9:
-                break
+            # Find the worst steps (lowest SSIM)
+            step_ssims = [(r["step"], r["ssim"], r.get("action", "")) for r in step_results if "ssim" in r]
+            avg_ssim = np.mean([s[1] for s in step_ssims]) if step_ssims else initial_ssim
 
+            if avg_ssim > 0.85:
+                break  # Good enough
+
+            # Build feedback with flow context — show worst failing steps
+            feedback_content = []
+            feedback_content.append({"type": "text", "text": (
+                f"I ran your HTML through the user flow. Results:\n"
+                f"  Initial page SSIM: {initial_ssim:.0%}\n"
+            )})
+
+            # Add initial diff
             diff_img = make_diff_image(ref_arr, gen_img, threshold=25)
             diff_b64 = pil_to_base64(Image.fromarray(diff_img))
-            diff_mask = np.any(np.abs(ref_arr.astype(int) - gen_img.astype(int)) > 25, axis=2)
-            diff_pct = diff_mask.sum() / diff_mask.size
+            feedback_content.append({"type": "text", "text": "Initial page diff (red = differences):"})
+            feedback_content.append({"type": "image_url", "image_url": {"url": f"data:image/png;base64,{diff_b64}"}})
+
+            # Show up to 3 worst interaction steps with their reference screenshots
+            worst_steps = sorted(step_ssims, key=lambda x: x[1])[:3]
+            for step_idx, ssim_val, action_desc in worst_steps:
+                if step_idx < len(actions) and actions[step_idx].get("screenshot"):
+                    ref_step_img = actions[step_idx]["screenshot"].resize((VIEWPORT["width"], VIEWPORT["height"]))
+                    ref_step_b64 = pil_to_base64(ref_step_img)
+                    feedback_content.append({"type": "text", "text": (
+                        f"\nStep {step_idx} — {action_desc}: SSIM={ssim_val:.0%} (FAILING)"
+                        f"\nHere's what this step should look like:"
+                    )})
+                    feedback_content.append({"type": "image_url", "image_url": {"url": f"data:image/png;base64,{ref_step_b64}"}})
+
+            feedback_content.append({"type": "text", "text": (
+                f"\nOverall flow SSIM: {avg_ssim:.0%}. "
+                f"The interactions aren't working correctly. "
+                f"List what needs to change to make the user flow work."
+            )})
 
             # Analyze
             messages.append({"role": "assistant", "content": content})
-            messages.append({"role": "user", "content": [
-                {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{ref_b64}"}},
-                {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{diff_b64}"}},
-                {"type": "text", "text": (
-                    f"Visual similarity: {ssim_score:.0%} ({diff_pct:.0%} pixels differ).\n"
-                    f"List the specific visual differences in the red areas. Be concise."
-                )},
-            ]})
+            messages.append({"role": "user", "content": feedback_content})
             analysis_resp = client_or_sampler.chat.completions.create(
-                model=openai_model, messages=messages, max_completion_tokens=1024, temperature=0.3,
+                model=openai_model, messages=messages, max_completion_tokens=2048, temperature=0.3,
             )
             analysis = analysis_resp.choices[0].message.content
             messages.append({"role": "assistant", "content": analysis})
