@@ -414,30 +414,79 @@ def run_action_sequence(page, actions: list[dict], out_dir: str) -> list[dict]:
             "gen_img": gen_img,  # store for feedback
         })
 
-        # Execute action
+        # Execute action — try selector first, then text match, then bbox
         op = action["op"]
         selector = action.get("selector")
         bbox = action.get("bbox")
+        action_repr = action.get("repr", "")
 
-        if op == "CLICK" and selector:
-            try:
-                page.click(selector, timeout=3000)
-                page.wait_for_timeout(500)
-            except Exception:
-                # Try clicking by coordinates from bbox
-                if bbox:
+        # Extract text from action repr like "[button]  Marketplace -> CLICK"
+        action_text = ""
+        if "->" in action_repr:
+            action_text = action_repr.split("->")[0].strip()
+            # Remove tag prefix like "[button]  "
+            if "]" in action_text:
+                action_text = action_text.split("]", 1)[1].strip()
+
+        def try_click():
+            # Try 1: selector
+            if selector:
+                try:
+                    page.click(selector, timeout=2000)
+                    return True
+                except Exception:
+                    pass
+            # Try 2: text match
+            if action_text:
+                for match_type in ["text", "has-text"]:
+                    try:
+                        page.get_by_text(action_text, exact=False).first.click(timeout=2000)
+                        return True
+                    except Exception:
+                        pass
+                # Try role-based
+                try:
+                    page.get_by_role("link", name=action_text).first.click(timeout=2000)
+                    return True
+                except Exception:
+                    pass
+                try:
+                    page.get_by_role("button", name=action_text).first.click(timeout=2000)
+                    return True
+                except Exception:
+                    pass
+            # Try 3: bbox coordinates
+            if bbox:
+                try:
                     coords = [float(x) for x in bbox.split(",")]
                     if len(coords) >= 4:
                         x, y = coords[0] + coords[2] / 2, coords[1] + coords[3] / 2
                         page.mouse.click(x, y)
-                        page.wait_for_timeout(500)
+                        return True
+                except Exception:
+                    pass
+            return False
 
-        elif op == "TYPE" and selector:
-            try:
-                page.fill(selector, action.get("value", ""), timeout=3000)
+        if op == "CLICK":
+            if try_click():
+                page.wait_for_timeout(500)
+
+        elif op == "TYPE":
+            typed = False
+            if selector:
+                try:
+                    page.fill(selector, action.get("value", ""), timeout=2000)
+                    typed = True
+                except Exception:
+                    pass
+            if not typed and action_text:
+                try:
+                    page.get_by_placeholder(action_text).first.fill(action.get("value", ""), timeout=2000)
+                    typed = True
+                except Exception:
+                    pass
+            if typed:
                 page.wait_for_timeout(300)
-            except Exception:
-                pass
 
         elif op == "SELECT" and selector:
             try:
