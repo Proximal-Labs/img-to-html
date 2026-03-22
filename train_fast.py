@@ -346,11 +346,6 @@ def main():
             analyze_futures = []
             for g, all_tokens, all_logprobs, content, html, gen_img0, gen_img1, reward in turn2_data:
                 feedback = build_feedback(task, gen_img0, gen_img1, reward)
-                convo = [
-                    {"role": "system", "content": SYSTEM_PROMPT},
-                    {"role": "user", "content": prompts[idx]._chunks[1:]},  # reuse prompt content
-                ]
-                # Simpler: rebuild from scratch
                 convo_msgs = [
                     {"role": "system", "content": SYSTEM_PROMPT},
                     {"role": "user", "content": [
