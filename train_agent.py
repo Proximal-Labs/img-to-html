@@ -312,13 +312,11 @@ def main():
         batch_rewards: list[float] = []
         batch_kl: list[float] = []
 
-        for idx in tqdm(range(len(batch)), desc=f"Batch {batch_idx}"):
-            ref_info = ref_infos[idx]
+        # Fire ALL turn-1 samples across all prompts at once
+        turn1_futures = []
+        initial_prompts_batch = []
+        for idx in range(len(batch)):
             ref_pil = ref_pils[idx]
-            ref_render = ref_renders[idx]
-            page = reward_pages[idx % len(reward_pages)]
-
-            # Parallel turn 1: all GROUP_SIZE rollouts share the same initial prompt
             initial_prompt = renderer.build_generation_prompt([
                 {"role": "system", "content": SYSTEM_PROMPT_AGENT},
                 {
@@ -329,11 +327,19 @@ def main():
                     ],
                 },
             ])
-
-            # Fire all turn-1 samples in one call
-            turn1_result = sampling_client.sample(
+            initial_prompts_batch.append(initial_prompt)
+            turn1_futures.append(sampling_client.sample(
                 prompt=initial_prompt, num_samples=GROUP_SIZE, sampling_params=sampling_params,
-            ).result()
+            ))
+
+        for idx in tqdm(range(len(batch)), desc=f"Batch {batch_idx}"):
+            ref_info = ref_infos[idx]
+            ref_pil = ref_pils[idx]
+            ref_render = ref_renders[idx]
+            page = reward_pages[idx % len(reward_pages)]
+            initial_prompt = initial_prompts_batch[idx]
+
+            turn1_result = turn1_futures[idx].result()
 
             # Process each rollout from turn 1, then continue individually for turns 2+
             rewards_G = []

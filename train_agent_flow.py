@@ -287,19 +287,30 @@ def main():
         batch_rewards: list[float] = []
         batch_kl: list[float] = []
 
-        for idx in tqdm(range(len(batch)), desc=f"Batch {batch_idx}"):
+        # Fire ALL turn-1 samples at once (parallel across all prompts)
+        turn1_futures = []
+        initial_prompts = []
+        batch_actions = []
+        for idx in range(len(batch)):
             task = batch[idx]
-            page = pages[idx % len(pages)]
             actions = task["actions"]
-
-            # Build flow prompt
+            batch_actions.append(actions)
             convo = build_flow_prompt(actions, renderer)
             initial_prompt = renderer.build_generation_prompt(convo)
-
-            # Parallel turn 1
-            turn1_result = sampling_client.sample(
+            initial_prompts.append(initial_prompt)
+            # Fire and don't wait
+            future = sampling_client.sample(
                 prompt=initial_prompt, num_samples=GROUP_SIZE, sampling_params=sampling_params,
-            ).result()
+            )
+            turn1_futures.append(future)
+
+        # Process results as they come
+        for idx in tqdm(range(len(batch)), desc=f"Batch {batch_idx}"):
+            actions = batch_actions[idx]
+            page = pages[idx % len(pages)]
+            initial_prompt = initial_prompts[idx]
+
+            turn1_result = turn1_futures[idx].result()  # blocks until this one is done
 
             rewards_G = []
             tokens_G = []
