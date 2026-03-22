@@ -52,9 +52,10 @@ logger = logging.getLogger(__name__)
 
 MAX_TURNS = int(os.environ.get("MAX_TURNS", 2))
 TOKENS_PER_TURN = int(os.environ.get("TOKENS_PER_TURN", 4096))
-MAX_FLOW_IMAGES = 3
-MAX_ACTION_STEPS = 3  # Cap action steps during training for speed
+MAX_FLOW_IMAGES = 2  # Initial page + 1 action result
+MAX_ACTION_STEPS = 1  # Only judge the first action
 VIEWPORT = {"width": 1280, "height": 720}
+FLOW_IMG_SIZE = (384, 216)  # Aggressive downsize for Tinker speed
 
 SYSTEM_PROMPT = (
     "You are an expert at generating interactive HTML/CSS/JS websites. "
@@ -155,7 +156,7 @@ def build_flow_prompt(actions, renderer):
         else:
             convo_content.append({"type": "text", "text": f"\nStep {j+1} — {desc}:"})
 
-        img = action["screenshot"].resize((1280, 720))
+        img = action["screenshot"].resize(FLOW_IMG_SIZE)
         convo_content.append({"type": "image", "image": img})
 
     convo_content.append({"type": "text", "text": "\n\nGenerate complete HTML/CSS/JS with all pages and interactions. Wrap in ```html ... ```."})
@@ -205,7 +206,7 @@ def run_actions_on_page(page, actions):
                 except Exception:
                     pass
             if clicked:
-                page.wait_for_timeout(500)
+                page.wait_for_timeout(100)
 
         elif op == "TYPE":
             typed = False
@@ -222,7 +223,7 @@ def run_actions_on_page(page, actions):
                 except Exception:
                     pass
             if typed:
-                page.wait_for_timeout(300)
+                page.wait_for_timeout(100)
 
     return results
 
@@ -319,7 +320,7 @@ def main():
                 if current_html is not None:
                     # Run action sequence
                     render_html(page, current_html)
-                    page.wait_for_timeout(500)
+                    page.wait_for_timeout(100)
                     step_results = run_actions_on_page(page, actions)
                     final_reward = compute_flow_reward(step_results)
 
@@ -333,8 +334,8 @@ def main():
                         )}]
 
                         for w in worst:
-                            ref_pil = Image.fromarray(w["ref_img"])
-                            gen_pil = Image.fromarray(w["gen_img"])
+                            ref_pil = Image.fromarray(w["ref_img"]).resize(FLOW_IMG_SIZE)
+                            gen_pil = Image.fromarray(w["gen_img"]).resize(FLOW_IMG_SIZE)
                             feedback.append({"type": "text", "text": f"\nStep {w['step']} — {w['action'][:40]} (SSIM={w['ssim']:.0%}):\nYour output:"})
                             feedback.append({"type": "image", "image": gen_pil})
                             feedback.append({"type": "text", "text": "Target:"})
@@ -375,7 +376,7 @@ def main():
 
                         if fixed_html is not None:
                             render_html(page, fixed_html)
-                            page.wait_for_timeout(500)
+                            page.wait_for_timeout(100)
                             step_results2 = run_actions_on_page(page, actions)
                             final_reward = compute_flow_reward(step_results2)
 
