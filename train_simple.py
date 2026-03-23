@@ -22,18 +22,12 @@ from tinker.types.tensor_data import TensorData
 from PIL import Image
 from playwright.sync_api import sync_playwright
 from tqdm import tqdm
-from transformers import AutoImageProcessor
+from transformers import AutoProcessor
 from skimage.metrics import structural_similarity as ssim_fn
 
 from tinker_cookbook import renderers
 from tinker_cookbook.tokenizer_utils import get_tokenizer
-
-
-def get_text_content(msg: dict) -> str:
-    content = msg.get("content", "")
-    if isinstance(content, list):
-        return " ".join(c.get("text", "") for c in content if isinstance(c, dict) and c.get("type") == "text")
-    return str(content)
+from train_agent import build_vlm_prompt, init_vlm, get_text_content
 
 from config import (
     MODEL, LORA_RANK, RENDERER_NAME, LR, KL_BETA,
@@ -83,8 +77,9 @@ def main():
 
     # Setup
     tokenizer = get_tokenizer(MODEL)
-    image_processor = AutoImageProcessor.from_pretrained(MODEL, use_fast=True)
-    renderer = renderers.get_renderer(RENDERER_NAME, tokenizer, image_processor=image_processor)
+    processor = AutoProcessor.from_pretrained(MODEL, trust_remote_code=True)
+    renderer = renderers.get_renderer(RENDERER_NAME, tokenizer)
+    init_vlm(processor, tokenizer)
 
     service_client = tinker.ServiceClient()
     resume_path = os.environ.get("RESUME_FROM")
@@ -126,7 +121,7 @@ def main():
             ref_images.append(ref_img)
 
             ref_pil = Image.open(item["screenshot"]).convert("RGB")
-            prompt = renderer.build_generation_prompt([
+            prompt = build_vlm_prompt([
                 {"role": "system", "content": SYSTEM_PROMPT},
                 {"role": "user", "content": [
                     {"type": "image", "image": ref_pil},
