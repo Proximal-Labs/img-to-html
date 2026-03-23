@@ -56,12 +56,12 @@ Real screenshots from Resy, eBay, ESPN, IKEA, United Airlines, etc.
 > - Data: WebSight v2 (not Mind2Web — this was before we switched datasets)
 > - Note: 2K token limit caused HTML cutoff on some examples. Reward used content-cropped SSIM which diverged from full-viewport SSIM.
 
-**SoundCloud** — biggest improvement
+**SoundCloud**
 | Reference | Base | RL Batch 10 |
 |-----------|------|-------------|
 | ![ref](eval_output/single_image_rl/4b-base-simple/example_09/ref.png) | ![base](eval_output/single_image_rl/4b-base-simple/example_09/gen.png) | ![rl](eval_output/single_image_rl/4b-simple-batch10/example_09/gen.png) |
 
-**Resy** — already good, got better
+**Resy**
 | Reference | Base | RL Batch 10 |
 |-----------|------|-------------|
 | ![ref](eval_output/single_image_rl/4b-base-simple/example_00/ref.png) | ![base](eval_output/single_image_rl/4b-base-simple/example_00/gen.png) | ![rl](eval_output/single_image_rl/4b-simple-batch10/example_00/gen.png) |
@@ -71,12 +71,12 @@ Real screenshots from Resy, eBay, ESPN, IKEA, United Airlines, etc.
 |-----------|------|-------------|
 | ![ref](eval_output/single_image_rl/4b-base-simple/example_02/ref.png) | ![base](eval_output/single_image_rl/4b-base-simple/example_02/gen.png) | ![rl](eval_output/single_image_rl/4b-simple-batch10/example_02/gen.png) |
 
-**eBay** — regressed
+**eBay**
 | Reference | Base | RL Batch 10 |
 |-----------|------|-------------|
 | ![ref](eval_output/single_image_rl/4b-base-simple/example_05/ref.png) | ![base](eval_output/single_image_rl/4b-base-simple/example_05/gen.png) | ![rl](eval_output/single_image_rl/4b-simple-batch10/example_05/gen.png) |
 
-**Carnival** — regressed
+**Carnival**
 | Reference | Base | RL Batch 10 |
 |-----------|------|-------------|
 | ![ref](eval_output/single_image_rl/4b-base-simple/example_06/ref.png) | ![base](eval_output/single_image_rl/4b-base-simple/example_06/gen.png) | ![rl](eval_output/single_image_rl/4b-simple-batch10/example_06/gen.png) |
@@ -129,14 +129,9 @@ Model sees multiple screenshots showing a user flow, generates interactive HTML 
 
 The reference flow shows a user booking a luxury car rental — the page changes completely at each step:
 
-**Step 1 — Landing page** (search form, promo banner)
-![step0](eval_output/flow_interactive/mind2web-gpt54-flow-16k/task_00/step_0_ref.png)
-
-**Step 3 — Location search** (typed location, dropdown with airport suggestions)
-![step2](eval_output/flow_interactive/mind2web-gpt54-flow-16k/task_00/step_2_ref.png)
-
-**Step 5 — Car selection** (completely different page: progress bar, car listing with Chrysler 300)
-![step4](eval_output/flow_interactive/mind2web-gpt54-flow-16k/task_00/step_4_ref.png)
+| Step 1 — Landing page | Step 3 — Location search | Step 5 — Car selection |
+|----------------------|--------------------------|----------------------|
+| ![step0](eval_output/flow_interactive/mind2web-gpt54-flow-16k/task_00/step_0_ref.png) | ![step2](eval_output/flow_interactive/mind2web-gpt54-flow-16k/task_00/step_2_ref.png) | ![step4](eval_output/flow_interactive/mind2web-gpt54-flow-16k/task_00/step_4_ref.png) |
 
 ### GPT-5.4 Generated Landing Page (SSIM 0.782)
 
