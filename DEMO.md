@@ -29,7 +29,25 @@ Real screenshots from Resy, eBay, ESPN, IKEA, United Airlines, etc.
 
 ## 2. Task 1: One-Shot Screenshot → HTML
 
-### After 10 Batches RL Training
+### 27B on WebSight + Design2Code (90 batches, best early result)
+
+> **Experiment details:**
+> - Model: Qwen 3.5-27B (LoRA rank 32)
+> - Reward: DOM-based (0.30 text + 0.30 layout + 0.20 color + 0.20 visual SSIM)
+> - Context: 1024 tokens
+> - Data: 1011 examples (974 WebSight v2 + 37 Design2Code), curriculum ordered
+> - Viewport: 1024x768
+> - Result: **+0.231 improvement, 9/10 wins** at batch 75 checkpoint
+
+| Reference | Base (27B untrained) | RL (batch 75) | Delta |
+|-----------|---------------------|---------------|-------|
+| ![ref](eval_output/single_image_rl/exp9-batch75/example_02/ref-render.png) | ![base](eval_output/single_image_rl/exp9-batch75/example_02/base.png) | ![rl](eval_output/single_image_rl/exp9-batch75/example_02/rl.png) | +0.199 |
+| ![ref](eval_output/single_image_rl/exp9-batch75/example_06/ref-render.png) | ![base](eval_output/single_image_rl/exp9-batch75/example_06/base.png) | ![rl](eval_output/single_image_rl/exp9-batch75/example_06/rl.png) | +0.749 |
+| ![ref](eval_output/single_image_rl/exp9-batch75/example_09/ref-render.png) | ![base](eval_output/single_image_rl/exp9-batch75/example_09/base.png) | ![rl](eval_output/single_image_rl/exp9-batch75/example_09/rl.png) | +0.469 |
+| ![ref](eval_output/single_image_rl/exp9-batch75/example_00/ref-render.png) | ![base](eval_output/single_image_rl/exp9-batch75/example_00/base.png) | ![rl](eval_output/single_image_rl/exp9-batch75/example_00/rl.png) | +0.079 |
+| ![ref](eval_output/single_image_rl/exp9-batch75/example_03/ref-render.png) | ![base](eval_output/single_image_rl/exp9-batch75/example_03/base.png) | ![rl](eval_output/single_image_rl/exp9-batch75/example_03/rl.png) | +0.035 |
+
+### 4B After 10 Batches RL Training
 
 > **Experiment details:**
 > - Model: Qwen 3.5-4B (LoRA rank 32)
@@ -78,24 +96,6 @@ Real screenshots from Resy, eBay, ESPN, IKEA, United Airlines, etc.
 | **Average** | **0.528** | **0.513** | **-0.015** |
 
 *Note: batch 10 model was trained with 2K token limit (HTML cutoff issues) and without blank page penalty. Later runs fix both.*
-
-### 27B on WebSight + Design2Code (90 batches, best early result)
-
-> **Experiment details:**
-> - Model: Qwen 3.5-27B (LoRA rank 32)
-> - Reward: DOM-based (0.30 text + 0.30 layout + 0.20 color + 0.20 visual SSIM)
-> - Context: 1024 tokens
-> - Data: 1011 examples (974 WebSight v2 + 37 Design2Code), curriculum ordered
-> - Viewport: 1024x768
-> - Result: **+0.231 improvement, 9/10 wins** at batch 75 checkpoint
-
-| Reference | Base (27B untrained) | RL (batch 75) | Delta |
-|-----------|---------------------|---------------|-------|
-| ![ref](eval_output/single_image_rl/exp9-batch75/example_02/ref-render.png) | ![base](eval_output/single_image_rl/exp9-batch75/example_02/base.png) | ![rl](eval_output/single_image_rl/exp9-batch75/example_02/rl.png) | +0.199 |
-| ![ref](eval_output/single_image_rl/exp9-batch75/example_06/ref-render.png) | ![base](eval_output/single_image_rl/exp9-batch75/example_06/base.png) | ![rl](eval_output/single_image_rl/exp9-batch75/example_06/rl.png) | +0.749 |
-| ![ref](eval_output/single_image_rl/exp9-batch75/example_09/ref-render.png) | ![base](eval_output/single_image_rl/exp9-batch75/example_09/base.png) | ![rl](eval_output/single_image_rl/exp9-batch75/example_09/rl.png) | +0.469 |
-| ![ref](eval_output/single_image_rl/exp9-batch75/example_00/ref-render.png) | ![base](eval_output/single_image_rl/exp9-batch75/example_00/base.png) | ![rl](eval_output/single_image_rl/exp9-batch75/example_00/rl.png) | +0.079 |
-| ![ref](eval_output/single_image_rl/exp9-batch75/example_03/ref-render.png) | ![base](eval_output/single_image_rl/exp9-batch75/example_03/base.png) | ![rl](eval_output/single_image_rl/exp9-batch75/example_03/rl.png) | +0.035 |
 
 ---
 
