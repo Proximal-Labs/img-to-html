@@ -313,15 +313,24 @@ def main():
         os.makedirs(ex_dir, exist_ok=True)
 
         ref_html = item.get("reference_html") or item["html"]
-        ref_info = extract_ref_info(page, ref_html, size=IMG_SIZE)
 
-        # Viewport-sized screenshot (1024x768, not square)
-        render_html(page, ref_html)
-        ref_render = np.array(Image.open(io.BytesIO(page.screenshot())).convert("RGB"))
-        ref_pil = Image.fromarray(ref_render)
+        # Use original screenshot if available (Mind2Web has real website screenshots)
+        # Fall back to re-rendering reference HTML (for WebSight/D2C which have proper CSS)
+        if item.get("screenshot") and os.path.exists(item["screenshot"]):
+            ref_pil_orig = Image.open(item["screenshot"]).convert("RGB")
+            ref_render = np.array(ref_pil_orig.resize((VIEWPORT_W, VIEWPORT_H)))
+            ref_pil = Image.fromarray(ref_render)
+            # Extract DOM info from the HTML for reward computation
+            ref_info = extract_ref_info(page, ref_html, size=IMG_SIZE)
+            # Override image with the actual screenshot for SSIM
+            ref_info["image"] = np.array(ref_pil_orig.resize((IMG_SIZE, IMG_SIZE)))
+        else:
+            ref_info = extract_ref_info(page, ref_html, size=IMG_SIZE)
+            render_html(page, ref_html)
+            ref_render = np.array(Image.open(io.BytesIO(page.screenshot())).convert("RGB"))
+            ref_pil = Image.fromarray(ref_render)
 
         ref_pil.save(os.path.join(ex_dir, "ref-render.png"))
-        # ref-render.png IS the model input now
 
         log(f"\nExample {i+1}/{args.n} ({len(ref_html)} chars)")
 

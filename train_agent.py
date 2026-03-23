@@ -224,9 +224,18 @@ def main():
         for i, item in enumerate(batch):
             page = pages[i % len(pages)]
             ref_html = item.get("reference_html") or item["html"]
-            ref_info = extract_ref_info(page, ref_html, size=IMG_SIZE)
+
+            # Use original screenshot if available (Mind2Web has real website screenshots)
+            if item.get("screenshot") and os.path.exists(item["screenshot"]):
+                ref_pil_orig = Image.open(item["screenshot"]).convert("RGB")
+                ref_render = np.array(ref_pil_orig.resize((VIEWPORT_W, VIEWPORT_H)))
+                ref_info = extract_ref_info(page, ref_html, size=IMG_SIZE)
+                ref_info["image"] = np.array(ref_pil_orig.resize((IMG_SIZE, IMG_SIZE)))
+            else:
+                ref_info = extract_ref_info(page, ref_html, size=IMG_SIZE)
+                ref_render = render_html_to_image(page, ref_html, size=max(VIEWPORT_W, VIEWPORT_H))
+
             ref_infos.append(ref_info)
-            ref_render = render_html_to_image(page, ref_html, size=max(VIEWPORT_W, VIEWPORT_H))
             ref_renders.append(ref_render)
             ref_pils.append(Image.fromarray(ref_render))
 
