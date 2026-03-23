@@ -478,11 +478,15 @@ def compute_reward_from_info(ref_info: dict, gen_info: dict) -> tuple[float, dic
         "color": color_palette_similarity(ref_info["colors"], gen_info["colors"]),
     }
 
-    # Pure SSIM
-    raw = details["ssim"]
+    # 0.60 SSIM (full viewport, not cropped) + 0.25 text + 0.15 color
+    raw = 0.60 * details["ssim"] + 0.25 * details["text"] + 0.15 * details["color"]
 
     # Scale to [-1, 1]
     reward = 2.0 * raw - 1.0
+
+    # Gate: blank page = -1 (prevents reward hacking)
+    if gen_info["image"].std() < 15:
+        reward = -1.0
 
     return float(reward), details
 
