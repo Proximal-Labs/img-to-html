@@ -517,14 +517,111 @@ Running larger experiments overnight.
 
 ---
 
+## Experiment 14: Content-Gated Reward + Blank Page Fix
+
+**Key finding:** Blank pages scored +0.08 reward (positive!) because SSIM between a white page and a mostly-white website is ~0.90. The model could learn to just output nothing.
+
+### The Problem
+```
+blank page:  0.60 * 0.90 + 0.25 * 0.00 + 0.15 * 0.00 = 0.54  → reward +0.08
+mediocre:    0.60 * 0.60 + 0.25 * 0.40 + 0.15 * 0.30 = 0.505 → reward +0.01
+```
+Blank beats a real attempt. SSIM at 60% weight is so dominant that a blank white page wins against light backgrounds.
+
+### The Fix: Multiplicative Content Gate
+```python
+content = max(text_match, color_match)
+content_gate = 0.2 + 0.8 * content  # 0.2 floor → 1.0 ceiling
+gated_ssim = ssim * content_gate
+raw = 0.60 * gated_ssim + 0.25 * text + 0.15 * color
+```
+
+No hard -1 gates. Smooth gradient everywhere. Results:
+- Blank page: reward **-0.78** (was +0.08)
+- Mediocre attempt: reward **-0.34** (correctly above blank)
+- Good attempt: reward **+0.31**
+- Perfect: reward **+1.00**
+
+---
+
+## Experiment 15: Parallel Rollouts + Tinker Pipelining (6x Speedup)
+
+**Key finding:** Multi-turn training was 50-60 min/batch because turn 2+ processed rollouts **one at a time** (256 sequential blocking calls). Fixed by parallelizing across all rollouts.
+
+### Before (Sequential)
+```
+Turn 1: parallel (all at once)                    ← FAST
+Turn 2: for each of 64 rollouts, sequentially:    ← SLOW
+    sample(analyze).result()  # blocks
+    sample(fix).result()      # blocks
+= 128 sequential Tinker calls, ~55 min/batch
+```
+
+### After (Parallel)
+```
+Turn 1: parallel (all at once)
+Turn 2: fire ALL 32 analyze calls → collect all
+         fire ALL 32 fix calls → collect all
+= 2 parallel batches, ~12 min/batch
+```
+
+### Additional Optimizations
+- **Pipeline fwd_bwd + optim_step** on same clock cycle (1 cycle vs 3)
+- **Overlap training with next batch sampling** (don't wait for training to finish before starting next batch)
+- **GROUP_SIZE 8→2** (was wasting 75% of rollouts with zero advantage)
+
+### Timing Results (4B, Mind2Web, 2 turns)
+
+| Config | Time/Batch |
+|--------|-----------|
+| Old sequential (GS=8, 3 turns) | ~3400s (56 min) |
+| Parallel (GS=4, 2 turns, 4K tokens) | 510s (8.5 min) |
+| Parallel (GS=2, 2 turns, 8K tokens) | 715s (12 min) |
+
+---
+
+## Experiment 16: Agent + Flow RL on Mind2Web (In Progress)
+
+**Goal:** Train 4B on real websites (Mind2Web) with all optimizations. Two parallel runs:
+
+### Task 2: Static Screenshot → Multi-Turn Agent
+- **Model:** Qwen 3.5-4B
+- **Dataset:** Mind2Web landing pages (500 real websites)
+- **Training:** BS=16, GS=2, 2 turns (analyze-fix), 8K tokens
+- **Reward:** Content-gated SSIM (0.60) + text (0.25) + color (0.15)
+- **Parallelism:** All rollouts parallel, pipelined training
+- **Status:** Running, batch 0 reward=0.023 → batch 1 reward=0.174
+
+### Task 3: Interactive Flow → Multi-Turn Agent
+- **Model:** Qwen 3.5-4B
+- **Dataset:** Mind2Web action sequences (500 tasks, 3886 total actions)
+- **Training:** BS=16, GS=2, 2 turns, 8K tokens, up to 3 action steps
+- **Reward:** Average SSIM across action steps, scaled to [-1, 1]
+- **Status:** Running, batch 0 completed in 1928s (32 min), reward=0.023
+
+### Early Agent Eval (2 batches only)
+```
+Avg SSIM:   0.828
+Avg Reward: 0.363
+```
+Already producing recognizable recreations of real websites after just 64 training examples.
+
+---
+
 ## Key Learnings
 
-1. **SSIM-anchored reward works best** — DOM comparison penalized visually correct outputs. If it looks right, it IS right. `0.60 SSIM + 0.25 text + 0.15 color`.
+1. **SSIM-anchored reward works best** — DOM comparison penalized visually correct outputs. If it looks right, it IS right.
 
-2. **Analyze-then-fix > direct fix** — splitting "what's wrong" from "fix it" prevents regression across turns.
+2. **Content gate prevents reward hacking** — blank pages can't ride high SSIM against light backgrounds. Smooth, no hard gates.
 
-3. **Benchmark against frontier models early** — revealed our reward was broken and our harness wasn't clicking buttons.
+3. **Analyze-then-fix > direct fix** — splitting "what's wrong" from "fix it" prevents regression across turns.
 
-4. **Models output short code regardless of source complexity** — 1-4K chars of HTML to match 100K+ char source pages. No dataset filtering needed.
+4. **Parallelize everything** — sequential rollouts were 6x slower than parallel. Fire all futures, collect later.
 
-5. **Test the harness, not just the model** — a Playwright bug made it look like no model could generate interactive pages.
+5. **Pipeline Tinker calls** — submit fwd_bwd + optim_step together (1 clock cycle vs 3). Start next batch's sampling before current training finishes.
+
+6. **GROUP_SIZE 2-4 is better than 8** — GS=8 wastes 75% of rollouts (zero advantage). GS=2 with more prompts gives better diversity.
+
+7. **Benchmark against frontier models early** — revealed our reward was broken and our harness wasn't clicking buttons.
+
+8. **Models output short code regardless of source complexity** — 1-4K chars of HTML to match 100K+ char source pages.

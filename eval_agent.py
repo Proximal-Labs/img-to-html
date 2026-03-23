@@ -39,7 +39,7 @@ from reward import (
     compute_reward_from_info, make_diff_image, render_html, render_html_to_file,
     render_html_to_image,
 )
-from train_agent import SYSTEM_PROMPT_AGENT, make_feedback_prompt
+from train_agent import SYSTEM_PROMPT_AGENT
 
 
 def log(msg):
@@ -163,7 +163,7 @@ def run_tinker_agent(
     ref_info: dict, page, max_turns: int, sampling_params,
 ) -> list[dict]:
     """Run multi-turn agent with Tinker. Returns list of turn results."""
-    from tinker_cookbook.renderers import get_text_content
+    from train_agent import build_vlm_prompt, get_text_content
     turns = []
 
     convo = [
@@ -175,7 +175,7 @@ def run_tinker_agent(
     ]
 
     for turn in range(max_turns):
-        prompt = renderer.build_generation_prompt(convo)
+        prompt = build_vlm_prompt(convo)
         result = sampling_client.sample(prompt=prompt, num_samples=1, sampling_params=sampling_params).result()
 
         parsed_msg, _ = renderer.parse_response(result.sequences[0].tokens)
@@ -228,7 +228,7 @@ def run_tinker_agent(
         ]})
 
         # Get analysis
-        analyze_prompt = renderer.build_generation_prompt(convo)
+        analyze_prompt = build_vlm_prompt(convo)
         analyze_result = sampling_client.sample(
             prompt=analyze_prompt, num_samples=1, sampling_params=sampling_params,
         ).result()
@@ -282,13 +282,16 @@ def main():
     else:
         import tinker
         from tinker import types
-        from transformers import AutoImageProcessor
         from tinker_cookbook import renderers
         from tinker_cookbook.tokenizer_utils import get_tokenizer
 
+        from transformers import AutoProcessor
+        from train_agent import init_vlm
+
         tokenizer = get_tokenizer(MODEL)
-        image_processor = AutoImageProcessor.from_pretrained(MODEL, use_fast=True)
-        renderer = renderers.get_renderer(RENDERER_NAME, tokenizer, image_processor=image_processor)
+        processor = AutoProcessor.from_pretrained(MODEL, trust_remote_code=True)
+        renderer = renderers.get_renderer(RENDERER_NAME, tokenizer)
+        init_vlm(processor, tokenizer)
         sampling_params = types.SamplingParams(
             max_tokens=4096, stop=renderer.get_stop_sequences(), temperature=0.3,
         )
