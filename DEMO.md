@@ -56,29 +56,29 @@ Real screenshots from Resy, eBay, ESPN, IKEA, United Airlines, etc.
 > - Data: WebSight v2 (not Mind2Web — this was before we switched datasets)
 > - Note: 2K token limit caused HTML cutoff on some examples. Reward used content-cropped SSIM which diverged from full-viewport SSIM.
 
-**SoundCloud: 0.206 → 0.545 (+0.339!)** — biggest improvement
-| Reference | Base (SSIM 0.206) | RL Batch 10 (SSIM 0.545) |
-|-----------|-------------------|--------------------------|
+**SoundCloud** — biggest improvement
+| Reference | Base | RL Batch 10 |
+|-----------|------|-------------|
 | ![ref](eval_output/single_image_rl/4b-base-simple/example_09/ref.png) | ![base](eval_output/single_image_rl/4b-base-simple/example_09/gen.png) | ![rl](eval_output/single_image_rl/4b-simple-batch10/example_09/gen.png) |
 
-**Resy: 0.816 → 0.849 (+0.033)** — already good, got better
-| Reference | Base (SSIM 0.816) | RL Batch 10 (SSIM 0.849) |
-|-----------|-------------------|--------------------------|
+**Resy** — already good, got better
+| Reference | Base | RL Batch 10 |
+|-----------|------|-------------|
 | ![ref](eval_output/single_image_rl/4b-base-simple/example_00/ref.png) | ![base](eval_output/single_image_rl/4b-base-simple/example_00/gen.png) | ![rl](eval_output/single_image_rl/4b-simple-batch10/example_00/gen.png) |
 
-**Under Armour: 0.520 → 0.527 (+0.007)**
-| Reference | Base (SSIM 0.520) | RL Batch 10 (SSIM 0.527) |
-|-----------|-------------------|--------------------------|
+**Under Armour**
+| Reference | Base | RL Batch 10 |
+|-----------|------|-------------|
 | ![ref](eval_output/single_image_rl/4b-base-simple/example_02/ref.png) | ![base](eval_output/single_image_rl/4b-base-simple/example_02/gen.png) | ![rl](eval_output/single_image_rl/4b-simple-batch10/example_02/gen.png) |
 
-**eBay: 0.727 → 0.603 (-0.124)** — regressed
-| Reference | Base (SSIM 0.727) | RL Batch 10 (SSIM 0.603) |
-|-----------|-------------------|--------------------------|
+**eBay** — regressed
+| Reference | Base | RL Batch 10 |
+|-----------|------|-------------|
 | ![ref](eval_output/single_image_rl/4b-base-simple/example_05/ref.png) | ![base](eval_output/single_image_rl/4b-base-simple/example_05/gen.png) | ![rl](eval_output/single_image_rl/4b-simple-batch10/example_05/gen.png) |
 
-**Carnival: 0.588 → 0.463 (-0.125)** — regressed
-| Reference | Base (SSIM 0.588) | RL Batch 10 (SSIM 0.463) |
-|-----------|-------------------|--------------------------|
+**Carnival** — regressed
+| Reference | Base | RL Batch 10 |
+|-----------|------|-------------|
 | ![ref](eval_output/single_image_rl/4b-base-simple/example_06/ref.png) | ![base](eval_output/single_image_rl/4b-base-simple/example_06/gen.png) | ![rl](eval_output/single_image_rl/4b-simple-batch10/example_06/gen.png) |
 
 | Site | Base SSIM | RL SSIM | SSIM Delta | Base Reward | RL Reward | Reward Delta |
