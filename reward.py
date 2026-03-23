@@ -1,14 +1,10 @@
 """
-Multi-signal reward function for screenshot-to-HTML RL.
+Reward function for screenshot-to-HTML RL.
 
-Designed to be smoothly climbable — each signal degrades gracefully.
-Pure DOM comparison — no model inference (CLIP removed).
+Content-gated SSIM + text + color signals.
+SSIM is gated by content presence to prevent blank page reward hacking.
 
-Reward signals:
-  0.30 - global text content match (all visible text compared)
-  0.30 - layout / block position matching (meaningful elements only)
-  0.20 - color palette similarity (quantized histogram overlap)
-  0.20 - visual SSIM+MSE (pixel-level)
+Reward = 2 * (0.60 * gated_ssim + 0.25 * text + 0.15 * color) - 1
 """
 
 import io
@@ -98,11 +94,6 @@ def render_html_to_file(page: Page, html_snippet: str | None, save_path: str, fu
     except Exception:
         Image.new("RGB", (VIEWPORT_W, VIEWPORT_H), (240, 240, 240)).save(save_path)
         return False
-
-
-def load_reference_image(path: str, size: int = 256) -> np.ndarray:
-    img = Image.open(path).convert("RGB").resize((size, size))
-    return np.array(img)
 
 
 # ── Visual diff for agent feedback ─────────────────────────────────────────────
@@ -254,175 +245,6 @@ def text_similarity(ref_text: str, gen_text: str) -> float:
     return SequenceMatcher(None, ref_text.lower(), gen_text.lower()).ratio()
 
 
-def _parse_css_color(color_str: str) -> tuple[int, int, int] | None:
-    match = re.match(r"rgba?\((\d+),\s*(\d+),\s*(\d+)", color_str)
-    return (int(match.group(1)), int(match.group(2)), int(match.group(3))) if match else None
-
-
-def _color_dist(c1, c2) -> float:
-    if c1 is None or c2 is None:
-        return 1.0
-    return sum((a - b) ** 2 for a, b in zip(c1, c2)) ** 0.5 / (255 ** 2 * 3) ** 0.5
-
-
-def styled_text_score(ref_blocks: list[dict], gen_blocks: list[dict]) -> float:
-    """
-    Compare text content paired with styling (font size, weight, color).
-    Each text-bearing block is matched by content similarity, then
-    styling similarity adds a bonus.
-    """
-    # Include blocks with text OR styled elements (buttons, inputs, colored sections)
-    STYLED_TAGS = {"button", "input", "a", "nav", "header", "footer", "section"}
-    ref_texts = [b for b in ref_blocks if b.get("text") or b.get("tag") in STYLED_TAGS]
-    gen_texts = [b for b in gen_blocks if b.get("text") or b.get("tag") in STYLED_TAGS]
-
-    if not ref_texts and not gen_texts:
-        return 1.0
-    if not ref_texts or not gen_texts:
-        return 0.0
-
-    used_gen = set()
-    scores = []
-
-    for ref in ref_texts:
-        best_score = 0.0
-        best_idx = -1
-
-        for j, gen in enumerate(gen_texts):
-            if j in used_gen:
-                continue
-            # Text content match
-            txt_sim = SequenceMatcher(None, ref["text"].lower(), gen["text"].lower()).ratio()
-            if txt_sim > best_score:
-                best_score = txt_sim
-                best_idx = j
-
-        if best_idx >= 0 and best_score > 0.3:
-            gen = gen_texts[best_idx]
-            used_gen.add(best_idx)
-
-            # Style bonus: font size, weight, color
-            style_scores = []
-
-            # Font size ratio
-            ref_fs = ref.get("fontSize", 0)
-            gen_fs = gen.get("fontSize", 0)
-            if ref_fs > 0 and gen_fs > 0:
-                style_scores.append(min(ref_fs, gen_fs) / max(ref_fs, gen_fs))
-
-            # Font weight match
-            style_scores.append(1.0 if ref.get("fontWeight") == gen.get("fontWeight") else 0.5)
-
-            # Text color
-            ref_c = _parse_css_color(ref.get("color", ""))
-            gen_c = _parse_css_color(gen.get("color", ""))
-            style_scores.append(1.0 - _color_dist(ref_c, gen_c))
-
-            # Background color (catches button/section styling)
-            ref_bg = _parse_css_color(ref.get("bgColor", ""))
-            gen_bg = _parse_css_color(gen.get("bgColor", ""))
-            style_scores.append(1.0 - _color_dist(ref_bg, gen_bg))
-
-            # Border radius (catches rounded buttons/cards)
-            ref_br = ref.get("borderRadius", "0px")
-            gen_br = gen.get("borderRadius", "0px")
-            style_scores.append(1.0 if ref_br == gen_br else 0.5)
-
-            style_bonus = sum(style_scores) / len(style_scores) if style_scores else 1.0
-
-            # Blend: 60% text content, 40% style match
-            scores.append(0.6 * best_score + 0.4 * style_bonus)
-        else:
-            scores.append(0.0)
-
-    # Soft penalty for unmatched
-    count_ratio = min(len(ref_texts), len(gen_texts)) / max(len(ref_texts), len(gen_texts))
-    count_penalty = 0.5 + 0.5 * count_ratio
-
-    return float((sum(scores) / len(scores)) * count_penalty)
-
-
-def _size_similarity(a: dict, b: dict) -> float:
-    """Compare width and height similarity (ratio-based)."""
-    w_sim = min(a["w"], b["w"]) / max(a["w"], b["w"]) if max(a["w"], b["w"]) > 0 else 1.0
-    h_sim = min(a["h"], b["h"]) / max(a["h"], b["h"]) if max(a["h"], b["h"]) > 0 else 1.0
-    return (w_sim + h_sim) / 2
-
-
-TAG_WEIGHTS = {
-    "h1": 2.0, "h2": 1.8, "h3": 1.6,
-    "button": 1.8, "input": 1.8, "textarea": 1.6, "select": 1.6,
-    "a": 1.5, "img": 1.5,
-    "nav": 1.3, "header": 1.3, "footer": 1.3,
-}
-
-
-def layout_score(ref_blocks: list[dict], gen_blocks: list[dict]) -> float:
-    """
-    Layout comparison using size similarity + relative vertical ordering.
-    Robust to cascading offset errors from earlier elements.
-    Important elements (headings, buttons, inputs) are weighted higher.
-    """
-    if not ref_blocks and not gen_blocks:
-        return 1.0
-    if not ref_blocks or not gen_blocks:
-        return 0.0
-
-    # Sort both by vertical position
-    ref_sorted = sorted(ref_blocks, key=lambda b: (b["y"], b["x"]))
-    gen_sorted = sorted(gen_blocks, key=lambda b: (b["y"], b["x"]))
-
-    # Match by best size + text overlap, weighted by tag importance
-    used_gen = set()
-    weighted_scores = []
-    weights = []
-
-    for ref in ref_sorted:
-        best_score = 0.0
-        best_idx = -1
-
-        for j, gen in enumerate(gen_sorted):
-            if j in used_gen:
-                continue
-
-            # Size similarity
-            size_sim = _size_similarity(ref, gen)
-
-            # Text overlap bonus (if both have text)
-            text_sim = 0.0
-            if ref.get("text") and gen.get("text"):
-                text_sim = SequenceMatcher(None, ref["text"].lower(), gen["text"].lower()).ratio()
-
-            score = 0.5 * size_sim + 0.5 * text_sim if (ref.get("text") or gen.get("text")) else size_sim
-
-            if score > best_score:
-                best_score = score
-                best_idx = j
-
-        tag_weight = TAG_WEIGHTS.get(ref.get("tag", ""), 1.0)
-        weighted_scores.append(best_score * tag_weight)
-        weights.append(tag_weight)
-        if best_idx >= 0 and best_score > 0.2:
-            used_gen.add(best_idx)
-
-    avg_match = sum(weighted_scores) / sum(weights)
-
-    # Check vertical ordering consistency
-    # For matched pairs, verify they appear in the same relative order
-    ordering_score = 1.0
-    if len(used_gen) >= 2:
-        matched_gen_indices = sorted(used_gen)
-        # If gen indices are monotonically increasing, ordering is preserved
-        inversions = sum(1 for i in range(len(matched_gen_indices) - 1)
-                        if matched_gen_indices[i] > matched_gen_indices[i + 1])
-        ordering_score = 1.0 - (inversions / max(len(matched_gen_indices) - 1, 1))
-
-    count_ratio = min(len(ref_blocks), len(gen_blocks)) / max(len(ref_blocks), len(gen_blocks))
-    count_penalty = 0.5 + 0.5 * count_ratio
-
-    return float(avg_match * ordering_score * count_penalty)
-
-
 def _quantize_color(c, step: int = 32):
     return (c[0] // step * step, c[1] // step * step, c[2] // step * step)
 
@@ -441,19 +263,6 @@ def color_palette_similarity(ref_colors: list, gen_colors: list) -> float:
     total = max(sum(ref_hist.values()), sum(gen_hist.values()))
 
     return float(intersection / total) if total > 0 else 0.0
-
-
-def _get_content_bbox(img_arr: np.ndarray, bg_color: int = 255, margin: int = 5):
-    diff = np.any(img_arr != bg_color, axis=2)
-    rows = np.any(diff, axis=1)
-    cols = np.any(diff, axis=0)
-    if not rows.any():
-        h, w = img_arr.shape[:2]
-        return 0, h, 0, w
-    y0, y1 = np.where(rows)[0][[0, -1]]
-    x0, x1 = np.where(cols)[0][[0, -1]]
-    h, w = img_arr.shape[:2]
-    return max(0, y0 - margin), min(h, y1 + margin + 1), max(0, x0 - margin), min(w, x1 + margin + 1)
 
 
 def visual_similarity(ref_img: np.ndarray, gen_img: np.ndarray) -> float:
@@ -496,40 +305,3 @@ def compute_reward_from_info(ref_info: dict, gen_info: dict) -> tuple[float, dic
     return float(reward), details
 
 
-def compute_reward(
-    generated_html: str | None,
-    reference_html: str,
-    ref_image: np.ndarray,
-    page: Page,
-    size: int = 256,
-) -> tuple[float, dict]:
-    """
-    Compute reward (non-cached path, used by eval).
-    For training, prefer extract_ref_info + compute_reward_from_info.
-    """
-    if generated_html is None:
-        return -1.0, {k: 0.0 for k in WEIGHTS}
-
-    try:
-        ref_info = extract_ref_info(page, reference_html, size=size)
-        gen_info = extract_gen_info(page, generated_html, size=size)
-    except Exception:
-        return -1.0, {k: 0.0 for k in WEIGHTS}
-
-    return compute_reward_from_info(ref_info, gen_info)
-
-
-# ── Backward-compatible wrapper ──────────────────────────────────────────────
-
-def compute_visual_reward(
-    generated_html: str | None,
-    reference_image: np.ndarray,
-    page: Page,
-    size: int = 256,
-    reference_html: str = "",
-) -> float:
-    if generated_html is None:
-        return -1.0
-
-    reward, _ = compute_reward(generated_html, reference_html, reference_image, page, size)
-    return reward

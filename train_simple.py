@@ -26,8 +26,14 @@ from transformers import AutoImageProcessor
 from skimage.metrics import structural_similarity as ssim_fn
 
 from tinker_cookbook import renderers
-from tinker_cookbook.renderers import get_text_content
 from tinker_cookbook.tokenizer_utils import get_tokenizer
+
+
+def get_text_content(msg: dict) -> str:
+    content = msg.get("content", "")
+    if isinstance(content, list):
+        return " ".join(c.get("text", "") for c in content if isinstance(c, dict) and c.get("type") == "text")
+    return str(content)
 
 from config import (
     MODEL, LORA_RANK, RENDERER_NAME, LR, KL_BETA,

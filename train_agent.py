@@ -16,7 +16,6 @@ import json
 import logging
 import os
 import random
-import sys
 import time
 
 import numpy as np
@@ -35,8 +34,8 @@ from tinker_cookbook.tokenizer_utils import get_tokenizer
 from config import (
     MODEL, LORA_RANK, RENDERER_NAME, BATCH_SIZE, GROUP_SIZE, MAX_BATCHES,
     LR, MAX_TOKENS, KL_BETA, PPO_CLIP_LOW, PPO_CLIP_HIGH, SAVE_EVERY,
-    IMG_SIZE, VIEWPORT_W, VIEWPORT_H, MANIFEST_PATH, DESIGN2CODE_MANIFEST,
-    LOG_DIR, SYSTEM_PROMPT, EVAL_DIR,
+    IMG_SIZE, VIEWPORT_W, VIEWPORT_H, MANIFEST_PATH,
+    LOG_DIR,
 )
 from reward import (
     compute_reward_from_info, extract_html_from_response,
@@ -149,163 +148,13 @@ SYSTEM_PROMPT_AGENT = (
     "Analyze the visual differences and fix your HTML to better match the target."
 )
 
-def make_feedback_prompt(ssim_score: float, diff_pct: float) -> str:
-    """Generate feedback prompt with SSIM score and diff coverage."""
-    quality = "very close" if ssim_score > 0.8 else "partially matching" if ssim_score > 0.5 else "significantly different"
-    return (
-        f"Visual similarity score: {ssim_score:.0%} — your output is {quality} to the target.\n\n"
-        f"The diff image above highlights problem areas in red ({diff_pct:.0%} of pixels differ). "
-        f"Red regions indicate where your HTML renders differently from the target — "
-        f"this could be wrong colors, missing elements, incorrect sizing, or layout issues.\n\n"
-        f"Please fix the red areas and output the complete corrected HTML in ```html ... ```."
-    )
-
-
-def load_dataset(manifest_path: str) -> list[dict]:
-    with open(manifest_path) as f:
-        return json.load(f)
-
-
-def load_training_data() -> list[dict]:
-    """Load training data from MANIFEST_PATH."""
-    dataset = load_dataset(MANIFEST_PATH)
-    random.shuffle(dataset)
-    logger.info(f"  Loaded {len(dataset)} examples from {MANIFEST_PATH}")
-    return dataset
-
-
-def run_agent_rollout(
-    sampling_client,
-    renderer,
-    ref_pil: Image.Image,
-    ref_info: dict,
-    ref_render: np.ndarray,
-    page,
-    sampling_params,
-) -> tuple[list[int], list[float], float]:
-    """
-    Run a single multi-turn agent rollout.
-
-    Returns (all_tokens, all_logprobs, final_reward).
-    Tokens/logprobs are concatenated across all turns.
-    """
-    all_tokens = []
-    all_logprobs = []
-
-    # Build initial prompt
-    convo = [
-        {"role": "system", "content": SYSTEM_PROMPT_AGENT},
-        {
-            "role": "user",
-            "content": [
-                {"type": "image", "image": ref_pil},
-                {"type": "text", "text": "Generate the HTML/CSS that reproduces this screenshot."},
-            ],
-        },
-    ]
-
-    current_html = None
-    final_reward = -1.0
-
-    for turn in range(MAX_TURNS):
-        prompt = build_vlm_prompt(convo)
-
-        result = sampling_client.sample(
-            prompt=prompt,
-            num_samples=1,
-            sampling_params=sampling_params,
-        ).result()
-
-        seq = result.sequences[0]
-        all_tokens.extend(seq.tokens)
-        all_logprobs.extend(seq.logprobs)
-
-        # Parse HTML from response
-        parsed_msg, _ = renderer.parse_response(seq.tokens)
-        content = get_text_content(parsed_msg)
-        current_html = extract_html_from_response(content)
-
-        if current_html is None:
-            # Model failed to produce HTML, stop
-            break
-
-        # Render and compute reward
-        try:
-            gen_info = extract_gen_info(page, current_html, size=IMG_SIZE)
-            final_reward, _ = compute_reward_from_info(ref_info, gen_info)
-        except Exception:
-            final_reward = -1.0
-            break
-
-        # If reward is high enough or last turn, stop
-        if final_reward > 0.9 or turn == MAX_TURNS - 1:
-            break
-
-        # Create diff at viewport resolution
-        gen_render = render_html_to_image(page, current_html, size=max(VIEWPORT_W, VIEWPORT_H))
-        diff_img = make_diff_image(ref_render, gen_render, threshold=25)
-        diff_pil = Image.fromarray(diff_img)
-
-        # Compute SSIM and diff percentage for feedback
-        from skimage.metrics import structural_similarity as ssim_fn
-        if ref_render.shape == gen_render.shape:
-            ssim_score = ssim_fn(ref_render, gen_render, channel_axis=2, data_range=255)
-        else:
-            ssim_score = 0.0
-        diff_mask = np.any(np.abs(ref_render.astype(int) - gen_render.astype(int)) > 25, axis=2)
-        diff_pct = diff_mask.sum() / diff_mask.size
-
-        # Step 1: Show ref + generated + diff, ask model to ANALYZE
-        gen_pil = Image.fromarray(gen_render)
-        convo.append({"role": "assistant", "content": content})
-        convo.append({
-            "role": "user",
-            "content": [
-                {"type": "text", "text": (
-                    f"Visual similarity: {ssim_score:.0%} ({diff_pct:.0%} of pixels differ).\n\n"
-                    f"Here is the target (what it should look like):"
-                )},
-                {"type": "image", "image": ref_pil},
-                {"type": "text", "text": "Here is your output:"},
-                {"type": "image", "image": gen_pil},
-                {"type": "text", "text": (
-                    "Here is the diff (red = where your output differs from the target):"
-                )},
-                {"type": "image", "image": diff_pil},
-                {"type": "text", "text": (
-                    "List the top 3 things that need to be fixed. Be specific — "
-                    "e.g. 'heading font size is too large', 'nav background should be #333', "
-                    "'missing footer section'. Be concise."
-                )},
-            ],
-        })
-
-        # Sample analysis
-        analyze_prompt = build_vlm_prompt(convo)
-        analyze_result = sampling_client.sample(
-            prompt=analyze_prompt, num_samples=1, sampling_params=sampling_params,
-        ).result()
-        analyze_seq = analyze_result.sequences[0]
-        all_tokens.extend(analyze_seq.tokens)
-        all_logprobs.extend(analyze_seq.logprobs)
-
-        analyze_msg, _ = renderer.parse_response(analyze_seq.tokens)
-        analysis = get_text_content(analyze_msg)
-
-        # Step 2: Ask model to FIX
-        convo.append({"role": "assistant", "content": analysis})
-        convo.append({"role": "user", "content": (
-            "Now fix ALL the issues you identified. "
-            "Output the complete corrected HTML in ```html ... ```."
-        )})
-
-    return all_tokens, all_logprobs, final_reward
-
-
 def main():
     os.makedirs(LOG_DIR, exist_ok=True)
 
-    dataset = load_training_data()
+    with open(MANIFEST_PATH) as f:
+        dataset = json.load(f)
+    random.shuffle(dataset)
+    logger.info(f"Loaded {len(dataset)} examples from {MANIFEST_PATH}")
     n_batches = len(dataset) // BATCH_SIZE
     if MAX_BATCHES > 0:
         n_batches = min(n_batches, MAX_BATCHES)
