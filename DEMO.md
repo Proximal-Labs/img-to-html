@@ -134,7 +134,45 @@ Model generates HTML → we render → model sees target vs output side-by-side 
 | 10 | 0.205 | 0.206 | -0.815 | -0.763 |
 | **Avg** | **0.472** | **0.468** | **-0.661** | **-0.658** |
 
-*Note: Analyze-fix barely helps on base model (+0.003 reward). The model isn't trained to use visual feedback. RL training in progress to improve this.*
+*Note: Analyze-fix barely helps on base model (+0.003 reward). The model isn't trained to use visual feedback.*
+
+### 4B RL (10 batches, single-shot) vs Base — Mind2Web
+
+> **Experiment details:**
+> - Model: Qwen 3.5-4B, LoRA rank 32, 10 batches RL (BS=16, GS=2)
+> - Reward: Pure SSIM (training), content-gated SSIM (eval)
+> - Data: Mind2Web landing pages, 8K token limit
+
+**Resy** — RL adds styled button, Climbing/Top Rated cards
+| Reference | Base | RL Batch 10 |
+|-----------|------|-------------|
+| ![ref](eval_output/m2w-4b-base-1turn/example_00/ref-render.png) | ![base](eval_output/m2w-4b-base-1turn/example_00/turn1.png) | ![rl](eval_output/m2w-simple-batch10/example_00/turn1.png) |
+
+**eBay** — RL gets teal hero section, brand cards layout
+| Reference | Base | RL Batch 10 |
+|-----------|------|-------------|
+| ![ref](eval_output/m2w-4b-base-1turn/example_05/ref-render.png) | ![base](eval_output/m2w-4b-base-1turn/example_05/turn1.png) | ![rl](eval_output/m2w-simple-batch10/example_05/turn1.png) |
+
+**Rentalcars** — RL produces blue gradient + search form (base missed entirely)
+| Reference | Base | RL Batch 10 |
+|-----------|------|-------------|
+| ![ref](eval_output/m2w-4b-base-1turn/example_07/ref-render.png) | ![base](eval_output/m2w-4b-base-1turn/example_07/turn1.png) | ![rl](eval_output/m2w-simple-batch10/example_07/turn1.png) |
+
+| # | Website | Base SSIM | RL SSIM | Delta |
+|---|---------|----------|---------|-------|
+| 1 | Resy | 0.745 | 0.743 | -0.002 |
+| 2 | FoxSports | 0.497 | 0.395 | -0.102 |
+| 3 | UnderArmour | 0.533 | 0.429 | -0.104 |
+| 4 | IKEA | 0.518 | 0.542 | +0.024 |
+| 5 | Yelp | 0.471 | 0.474 | +0.003 |
+| 6 | eBay | 0.716 | 0.627 | -0.089 |
+| 7 | Carnival | 0.550 | 0.387 | -0.163 |
+| 8 | Rentalcars | 0.396 | 0.573 | **+0.177** |
+| 9 | Viator | 0.322 | 0.328 | +0.006 |
+| 10 | SoundCloud | 0.208 | 0.228 | +0.020 |
+| **Avg** | | **0.536** | **0.472** | **-0.064** |
+
+*Mixed results after 10 batches — some sites improve significantly (Rentalcars +0.177) while others regress. Training uses pure SSIM reward but eval uses content-gated SSIM, causing mismatch. Multi-turn agent training (with matching reward) in progress.*
 
 ---
 

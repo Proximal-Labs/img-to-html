@@ -53,20 +53,42 @@
 |-----------|---------|
 | ![ref](eval_output/m2w-4b-base-1turn/example_09/ref-render.png) | ![gen](eval_output/m2w-4b-base-1turn/example_09/turn1.png) |
 
-## Comparison: 1-turn vs 2-turn (analyze-fix)
+## Base vs RL Comparison
 
-| Config | Avg SSIM | Avg Reward |
-|--------|---------|-----------|
-| 1-turn (single shot) | 0.536 | -0.677 |
-| 2-turn (analyze-fix) | 0.468 | -0.658 |
+| Config | Avg SSIM | Avg Reward | Notes |
+|--------|---------|-----------|-------|
+| Base 1-turn | 0.536 | -0.677 | No training |
+| Base 2-turn (analyze-fix) | 0.468 | -0.658 | Analyze-fix doesn't help without training |
+| **Simple RL batch 10** | **0.472** | **-0.698** | Pure SSIM reward, slight regression |
 
-Analyze-fix barely helps on base model (+0.019 reward). The model isn't trained to use visual feedback. RL training should improve this.
+### Simple RL Batch 10 — Per-Site
+
+| # | Website | Base SSIM | RL SSIM | Delta |
+|---|---------|----------|---------|-------|
+| 1 | Resy | 0.745 | 0.743 | -0.002 |
+| 2 | FoxSports | 0.497 | 0.395 | -0.102 |
+| 3 | UnderArmour | 0.533 | 0.429 | -0.104 |
+| 4 | IKEA | 0.518 | 0.542 | +0.024 |
+| 5 | Yelp | 0.471 | 0.474 | +0.003 |
+| 6 | eBay | 0.716 | 0.627 | -0.089 |
+| 7 | Carnival | 0.550 | 0.387 | -0.163 |
+| 8 | Rentalcars | 0.396 | 0.573 | +0.177 |
+| 9 | Viator | 0.322 | 0.328 | +0.006 |
+| 10 | SoundCloud | 0.208 | 0.228 | +0.020 |
+
+Simple RL (pure SSIM, no content gate) shows mixed results after 10 batches — some sites improve (Rentalcars +0.177) but others regress. Train/eval reward mismatch likely: training uses raw SSIM, eval uses content-gated SSIM.
+
+### Visual Comparison — Resy (Base vs RL batch 10)
+
+| Reference | Base 4B | RL Batch 10 |
+|-----------|---------|-------------|
+| ![ref](eval_output/m2w-4b-base-1turn/example_00/ref-render.png) | ![base](eval_output/m2w-4b-base-1turn/example_00/turn1.png) | ![rl](eval_output/m2w-simple-batch10/example_00/turn1.png) |
 
 ## Training Status
 
-| Run | Status | Batch Time | Notes |
-|-----|--------|-----------|-------|
-| Simple RL (1-turn) | Running | ~350s/batch | Pure SSIM reward, batch 2 done |
-| Agent RL (2-turn) | Running | ~1244s/batch | Analyze-fix, batch 0 done |
+| Run | Status | Batch | Batch Time | Notes |
+|-----|--------|-------|-----------|-------|
+| Simple RL (1-turn) | Running | ~15/31 | ~350s | Pure SSIM reward |
+| Agent RL (2-turn) | Running | ~5/31 | ~800s | Analyze-fix, content-gated reward |
 
-Will eval simple RL at checkpoints 10 and 20 to measure improvement.
+Waiting for checkpoint 20 eval and agent RL results.
