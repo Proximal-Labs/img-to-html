@@ -55,20 +55,20 @@ Base 4B vs RL-trained 4B (10 batches). Both single-shot (1 turn, no analyze-fix)
 
 > **Setup:** Qwen 3.5-4B, LoRA rank 32. RL trained with `train_simple.py` (pure SSIM reward, BS=16, GS=2, 8K tokens). Eval on original website screenshots.
 
-**Resy** — RL adds styled "MORE ABOUT RESY" button, Climbing/Top Rated cards
-| Reference | Base (1 turn) | RL Batch 10 (1 turn) |
-|-----------|--------------|---------------------|
-| ![ref](eval_output/m2w-4b-base-1turn/example_00/ref-render.png) | ![base](eval_output/m2w-4b-base-1turn/example_00/turn1.png) | ![rl](eval_output/m2w-simple-batch10/example_00/turn1.png) |
+**Rentalcars** — RL produces blue gradient + search form; batch 20 adds background image
+| Reference | Base (1 turn) | RL Batch 10 | RL Batch 20 |
+|-----------|--------------|-------------|-------------|
+| ![ref](eval_output/m2w-4b-base-1turn/example_07/ref-render.png) | ![base](eval_output/m2w-4b-base-1turn/example_07/turn1.png) | ![rl10](eval_output/m2w-simple-batch10/example_07/turn1.png) | ![rl20](eval_output/m2w-simple-batch20/example_07/turn1.png) |
 
-**eBay** — RL gets teal hero section, brand cards layout
-| Reference | Base (1 turn) | RL Batch 10 (1 turn) |
-|-----------|--------------|---------------------|
-| ![ref](eval_output/m2w-4b-base-1turn/example_05/ref-render.png) | ![base](eval_output/m2w-4b-base-1turn/example_05/turn1.png) | ![rl](eval_output/m2w-simple-batch10/example_05/turn1.png) |
+**Resy** — Batch 20 adds styled city grid buttons
+| Reference | Base (1 turn) | RL Batch 10 | RL Batch 20 |
+|-----------|--------------|-------------|-------------|
+| ![ref](eval_output/m2w-4b-base-1turn/example_00/ref-render.png) | ![base](eval_output/m2w-4b-base-1turn/example_00/turn1.png) | ![rl10](eval_output/m2w-simple-batch10/example_00/turn1.png) | ![rl20](eval_output/m2w-simple-batch20/example_00/turn1.png) |
 
-**Rentalcars** — RL produces blue gradient + search form (biggest improvement, +0.177 SSIM)
-| Reference | Base (1 turn) | RL Batch 10 (1 turn) |
-|-----------|--------------|---------------------|
-| ![ref](eval_output/m2w-4b-base-1turn/example_07/ref-render.png) | ![base](eval_output/m2w-4b-base-1turn/example_07/turn1.png) | ![rl](eval_output/m2w-simple-batch10/example_07/turn1.png) |
+**eBay** — Consistent teal hero + brand cards across checkpoints
+| Reference | Base (1 turn) | RL Batch 10 | RL Batch 20 |
+|-----------|--------------|-------------|-------------|
+| ![ref](eval_output/m2w-4b-base-1turn/example_05/ref-render.png) | ![base](eval_output/m2w-4b-base-1turn/example_05/turn1.png) | ![rl10](eval_output/m2w-simple-batch10/example_05/turn1.png) | ![rl20](eval_output/m2w-simple-batch20/example_05/turn1.png) |
 
 | # | Website | Base | RL Batch 10 | RL Batch 20 |
 |---|---------|------|------------|------------|
@@ -95,10 +95,25 @@ Model generates HTML → sees target vs its output side-by-side → analyzes dif
 
 > **Setup:** Same base 4B, 2 turns with analyze-fix step. No RL training — testing if the base model can self-correct.
 
-**Resy** — Turn 1 vs Turn 2 (SSIM 0.753 → 0.753, no change)
-| Reference | Base Turn 1 | Base Turn 2 |
-|-----------|------------|------------|
-| ![ref](eval_output/m2w-4b-base-2turns-v2/example_00/ref-render.png) | ![t1](eval_output/m2w-4b-base-2turns-v2/example_00/turn1.png) | ![t2](eval_output/m2w-4b-base-2turns-v2/example_00/turn2.png) |
+**Resy** (SSIM 0.753)
+| Reference | Base Turn 1 |
+|-----------|------------|
+| ![ref](eval_output/m2w-4b-base-2turns-v2/example_00/ref-render.png) | ![t1](eval_output/m2w-4b-base-2turns-v2/example_00/turn1.png) |
+
+**eBay** (SSIM 0.630)
+| Reference | Base Turn 1 |
+|-----------|------------|
+| ![ref](eval_output/m2w-4b-base-2turns-v2/example_05/ref-render.png) | ![t1](eval_output/m2w-4b-base-2turns-v2/example_05/turn1.png) |
+
+**UnderArmour** (SSIM 0.470)
+| Reference | Base Turn 1 |
+|-----------|------------|
+| ![ref](eval_output/m2w-4b-base-2turns-v2/example_02/ref-render.png) | ![t1](eval_output/m2w-4b-base-2turns-v2/example_02/turn1.png) |
+
+**Rentalcars** (SSIM 0.528)
+| Reference | Base Turn 1 |
+|-----------|------------|
+| ![ref](eval_output/m2w-4b-base-2turns-v2/example_07/ref-render.png) | ![t1](eval_output/m2w-4b-base-2turns-v2/example_07/turn1.png) |
 
 | # | Website | Turn 1 SSIM | Turn 2 SSIM | Delta |
 |---|---------|------------|------------|-------|
