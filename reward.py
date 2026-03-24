@@ -65,10 +65,15 @@ def _wrap_snippet(html_snippet: str) -> str:
 
 
 def render_html(page: Page, html_snippet: str):
-    if is_full_html(html_snippet):
-        page.set_content(html_snippet)
-    else:
-        page.set_content(_wrap_snippet(html_snippet))
+    try:
+        if is_full_html(html_snippet):
+            page.set_content(html_snippet, timeout=5000)
+        else:
+            page.set_content(_wrap_snippet(html_snippet), timeout=5000)
+    except Exception:
+        # If set_content times out, try with a blank page first
+        page.set_content("<html><body></body></html>", timeout=2000)
+        return
     try:
         page.wait_for_load_state("networkidle", timeout=3000)
     except Exception:

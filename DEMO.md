@@ -180,6 +180,16 @@ The model saw all flow screenshots and generated HTML that matches the initial s
 
 > **Setup:** Qwen 3.5-4B base (no RL), 5 Mind2Web tasks with action sequences, 2 turns with analyze-fix. Model sees flow screenshots, generates interactive HTML/JS, we run actions via Playwright and compare per-step SSIM.
 
+**Yahoo Sports** (Initial SSIM 0.414) — Got dark nav, sports ticker, article layout
+| Reference | Base 4B |
+|-----------|---------|
+| ![ref](eval_output/m2w-flow-4b-base/task_00/step_0_ref.png) | ![gen](eval_output/m2w-flow-4b-base/task_00/step_0_gen.png) |
+
+**Under Armour** (Initial SSIM 0.472) — Got hero text, "Shop New Colors" button, red/white split
+| Reference | Base 4B |
+|-----------|---------|
+| ![ref](eval_output/m2w-flow-4b-base/task_01/step_0_ref.png) | ![gen](eval_output/m2w-flow-4b-base/task_01/step_0_gen.png) |
+
 | Task | Website | Initial SSIM | Avg Step SSIM | Actions |
 |------|---------|-------------|---------------|---------|
 | 1 | sports.yahoo | 0.414 | 0.383 | 4 |
@@ -188,8 +198,6 @@ The model saw all flow screenshots and generated HTML that matches the initial s
 | 4 | sports.yahoo | 0.174 | 0.180 | 3 |
 | 5 | sports.yahoo | 0.378 | 0.373 | 2 |
 | **Avg** | | **0.413** | **0.421** | |
-
-Comparison with GPT-5.4:
 
 | Model | Avg Initial SSIM | Avg Step SSIM |
 |-------|-----------------|---------------|
