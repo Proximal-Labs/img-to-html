@@ -53,8 +53,7 @@ Real screenshots from Resy, eBay, ESPN, IKEA, United Airlines, etc.
 > - Model: Qwen 3.5-4B (LoRA rank 32)
 > - Reward: 0.60 SSIM (content-cropped 256x256) + 0.25 text match + 0.15 color match
 > - Context: 2048 tokens max
-> - Data: WebSight v2 (not Mind2Web — this was before we switched datasets)
-> - Note: 2K token limit caused HTML cutoff on some examples. Reward used content-cropped SSIM which diverged from full-viewport SSIM.
+> - Data: Mind2Web
 
 **SoundCloud**
 | Reference | Base | RL Batch 10 |
@@ -137,16 +136,6 @@ Model generates HTML → we render → model sees target vs output side-by-side 
 
 *Note: Analyze-fix barely helps on base model (+0.003 reward). The model isn't trained to use visual feedback. RL training in progress to improve this.*
 
-### GPT-5.4: Analyze-Fix vs Naive (10 turns)
-```
-Naive:        0.444 → peaked 0.490 → REGRESSED to 0.430 by turn 10
-Analyze-fix:  0.442 → 0.520 → held at 0.509 (no regression)
-```
-
-The model's self-analysis was specific and accurate:
-> "heading font size is too large, paragraph line-height is too tall,
-> font weight too heavy, paragraph width too narrow"
-
 ---
 
 ## 4. Task 3: Interactive Flow (Action Sequences)
@@ -181,27 +170,9 @@ The model saw all flow screenshots and generated HTML that matches the initial s
 |-----------|-------------------|
 | ![ref](eval_output/flow_interactive/mind2web-gpt54-flow-16k/task_04/step_0_ref.png) | ![gen](eval_output/flow_interactive/mind2web-gpt54-flow-16k/task_04/step_0_gen.png) |
 
----
 
 ---
 
-## 5. Frontier Model Comparisons
-| ![ref](eval_output/frontier_baselines/gpt54-hard-d2c/task_00/reference.png) | ![gen](eval_output/frontier_baselines/gpt54-hard-d2c/task_00/turn1.png) | 0.930 |
-| ![ref](eval_output/frontier_baselines/gpt54-hard-d2c/task_01/reference.png) | ![gen](eval_output/frontier_baselines/gpt54-hard-d2c/task_01/turn1.png) | 0.776 |
-| ![ref](eval_output/frontier_baselines/gpt54-hard-d2c/task_05/reference.png) | ![gen](eval_output/frontier_baselines/gpt54-hard-d2c/task_05/turn1.png) | 0.941 |
-
-### The SSIM-Perfect-But-Reward-Broken Discovery
-GPT-5.4 produced SSIM 0.991 (pixel-perfect) but our DOM reward scored -0.5. This led us to switch to pure SSIM reward.
-
----
-
-## 7. Key Findings
-
-1. **SSIM is the right reward** — DOM comparison penalized pixel-perfect outputs
-2. **Analyze-then-fix prevents regression** — splitting "what's wrong" from "fix it" works
-3. **Output is always short** — 100K char pages reproduced in 1-4K chars
-4. **Frontier models generate interactive JS** — GPT-5.4: 18-22 handlers, Opus: full multi-page apps
-5. **Test your harness** — our Playwright wasn't clicking buttons (selector bug)
 
 ## 8. Challenges
 
@@ -215,14 +186,5 @@ GPT-5.4 produced SSIM 0.991 (pixel-perfect) but our DOM reward scored -0.5. This
 | HTML cutoff (white screens) | 16K token limit |
 | Viewport sizes causing bad comparisons | 1024x768 or 1280x720 standard |
 
-## 9. Next Steps
-
-1. **SSIM is a great reward, but you need to prevent hacking.** The model learned to generate blank pages that score high SSIM against light backgrounds. Simple fix (pixel variance check) works but more sophisticated checks may be needed at scale.
-
-2. **Custom rewards are valuable but must be carefully constructed.** DOM-based rewards captured real signal (text match, layout, colors) but penalized visually identical outputs when the internals differed. The lesson: custom rewards should never contradict SSIM — if it looks right, the reward should be high regardless of how the HTML is structured internally.
-
-3. **Scale training on harder datasets.** Mind2Web real websites are the right difficulty level. WebSight/D2C are too easy — models already score well without RL.
-
-4. **Agentic multi-turn with analyze-fix at inference time.** Train one-shot for speed, add the analyze-fix loop at inference time for quality. The analyze step costs one extra API call but prevents regression.
-
-5. **Interactive flow training needs faster infrastructure.** 27B with multi-image prompts is 4.5 hrs/batch. Either use smaller models for flow training or wait for faster inference.
+Learnings:
+**SSIM is an effective reward but is vulnerable to hacking, so custom DOM-based rewards are needed—carefully designed.** While SSIM captures visual similarity, the model can exploit it by generating blank or low-variance pages that artificially inflate scores. DOM-based rewards (like text, layout, color matching) add real signal but must be constructed to never penalize visually correct outputs—custom rewards should complement SSIM, not contradict it. The system should reward correct appearance regardless of HTML structure, while using checks (like pixel variance) to prevent SSIM exploitation.

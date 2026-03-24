@@ -31,7 +31,7 @@ from reward import (
     render_html, extract_html_from_response, make_diff_image,
     extract_ref_info, extract_gen_info, compute_reward_from_info,
 )
-from train_agent import SYSTEM_PROMPT_AGENT, make_feedback_prompt
+from train_agent import SYSTEM_PROMPT_AGENT
 
 VIEWPORT = {"width": 1280, "height": 720}  # Mind2Web uses 1280 wide
 
@@ -333,7 +333,7 @@ def run_agent_generate(
 
     else:
         # Tinker path
-        from tinker_cookbook.renderers import get_text_content
+        from train_agent import build_vlm_prompt, get_text_content
         convo = [
             {"role": "system", "content": SYSTEM_PROMPT_AGENT},
             {"role": "user", "content": user_content},
@@ -341,7 +341,7 @@ def run_agent_generate(
 
         current_html = None
         for turn in range(max_turns):
-            prompt = renderer.build_generation_prompt(convo)
+            prompt = build_vlm_prompt(convo)
             result = client_or_sampler.sample(prompt=prompt, num_samples=1, sampling_params=sampling_params).result()
             parsed_msg, _ = renderer.parse_response(result.sequences[0].tokens)
             content = get_text_content(parsed_msg)
@@ -352,6 +352,7 @@ def run_agent_generate(
 
             render_html(page, current_html)
             gen_img = take_screenshot(page)
+            gen_pil = Image.fromarray(gen_img)
             ref_arr = np.array(ref_pil)
             if ref_arr.shape != gen_img.shape:
                 ref_arr = np.array(ref_pil.resize((gen_img.shape[1], gen_img.shape[0])))
@@ -360,21 +361,17 @@ def run_agent_generate(
             if ssim_score > 0.9:
                 break
 
-            diff_img = make_diff_image(ref_arr, gen_img, threshold=25)
-            diff_pil = Image.fromarray(diff_img)
-            diff_mask = np.any(np.abs(ref_arr.astype(int) - gen_img.astype(int)) > 25, axis=2)
-            diff_pct = diff_mask.sum() / diff_mask.size
-
             convo.append({"role": "assistant", "content": content})
             convo.append({"role": "user", "content": [
+                {"type": "text", "text": "Here is the target screenshot:"},
                 {"type": "image", "image": ref_pil},
-                {"type": "image", "image": diff_pil},
+                {"type": "text", "text": "Here is what your HTML currently renders as:"},
+                {"type": "image", "image": gen_pil},
                 {"type": "text", "text": (
-                    f"Visual similarity: {ssim_score:.0%} ({diff_pct:.0%} pixels differ).\n"
-                    f"List the specific visual differences. Be concise."
+                    "Compare the two images. List the specific visual differences. Be concise."
                 )},
             ]})
-            analyze_prompt = renderer.build_generation_prompt(convo)
+            analyze_prompt = build_vlm_prompt(convo)
             analyze_result = client_or_sampler.sample(prompt=analyze_prompt, num_samples=1, sampling_params=sampling_params).result()
             analyze_msg, _ = renderer.parse_response(analyze_result.sequences[0].tokens)
             analysis = get_text_content(analyze_msg)
@@ -540,14 +537,16 @@ def main():
     else:
         import tinker
         from tinker import types
-        from transformers import AutoImageProcessor
+        from transformers import AutoProcessor
         from tinker_cookbook import renderers as rnd
         from tinker_cookbook.tokenizer_utils import get_tokenizer
+        from train_agent import init_vlm
 
         tokenizer = get_tokenizer(MODEL)
-        image_processor = AutoImageProcessor.from_pretrained(MODEL, use_fast=True)
-        renderer = rnd.get_renderer(RENDERER_NAME, tokenizer, image_processor=image_processor)
-        sampling_params = types.SamplingParams(max_tokens=4096, stop=renderer.get_stop_sequences(), temperature=0.3)
+        processor = AutoProcessor.from_pretrained(MODEL, trust_remote_code=True)
+        renderer = rnd.get_renderer(RENDERER_NAME, tokenizer)
+        init_vlm(processor, tokenizer)
+        sampling_params = types.SamplingParams(max_tokens=8192, stop=renderer.get_stop_sequences(), temperature=0.3)
 
         sc = tinker.ServiceClient()
         if args.model_path:
