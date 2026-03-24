@@ -1,113 +1,101 @@
 # prox — Screenshot-to-HTML RL Training
 
-Train a vision-language model (Qwen3.5-27B) to convert webpage screenshots into HTML/CSS using reinforcement learning with [Tinker](https://docs.tinker.dev/).
+RL-train open-source VLMs (Qwen 3.5-4B/27B) to reproduce real websites from screenshots using [Tinker](https://docs.tinker.dev/).
 
-## Overview
+## What it does
 
-The pipeline:
-1. **Dataset**: Downloads and filters HTML/screenshot pairs from [WebSight v0.2](https://huggingface.co/datasets/HuggingFaceM4/WebSight)
-2. **Training**: GRPO-style RL with PPO clipped loss — the model generates HTML from a screenshot and gets rewarded based on how well its output matches the reference
-3. **Eval**: Compares base vs RL-trained model on held-out examples, saving side-by-side screenshots
+Model sees a screenshot of a real website → generates HTML/CSS/JS that reproduces it. We train with GRPO + PPO using SSIM-based reward, with multi-turn analyze-fix for self-correction.
 
-### Reward Signal
+## Results
 
-Multi-signal reward combining DOM-level and image-level metrics:
-- **DOM**: block position (IoU), text content, background/text color, font family/size
-- **Image**: CLIP perceptual similarity, SSIM + MSE pixel similarity
+**4B model on Mind2Web real websites (Resy, eBay, IKEA, etc.):**
+
+| | Avg SSIM | Avg Reward |
+|---|---------|-----------|
+| Base (no RL) | 0.536 | -0.677 |
+| RL (10 batches, single-shot) | TBD | TBD |
+| RL (2-turn analyze-fix) | TBD | TBD |
+
+See [DEMO.md](DEMO.md) for visual comparisons and [EXPERIMENTS.md](EXPERIMENTS.md) for full experiment log.
 
 ## Setup
 
 ```bash
-# Clone and enter the repo
-git clone <repo-url> && cd prox
-
-# Create a virtual environment
 python -m venv .venv && source .venv/bin/activate
-
-# Install dependencies
 pip install -r requirements.txt
 pip install tinker-cookbook
 playwright install chromium
-```
-
-Set your Tinker API key:
-
-```bash
 export TINKER_API_KEY=your-key-here
-# Or create a .env file (see .env.example)
 ```
 
-## Usage
-
-### Quick start (full pipeline)
+## Training
 
 ```bash
-./run.sh
+# Single-shot: screenshot → HTML (fastest, ~350s/batch)
+MODEL=Qwen/Qwen3.5-4B MANIFEST_PATH=data/mind2web_landing/manifest.json \
+  RENDERER_NAME=qwen3_disable_thinking \
+  python train_simple.py
+
+# Multi-turn agent: generate → analyze → fix (2 turns, ~800s/batch)
+MODEL=Qwen/Qwen3.5-4B MANIFEST_PATH=data/mind2web_landing/manifest.json \
+  RENDERER_NAME=qwen3_disable_thinking MAX_TURNS=2 \
+  python train_agent.py
+
+# Interactive flow: action sequences with Playwright (~1900s/batch)
+MODEL=Qwen/Qwen3.5-4B RENDERER_NAME=qwen3_disable_thinking \
+  MAX_ACTION_STEPS=3 \
+  python train_flow.py
 ```
 
-### Step by step
+## Eval
 
 ```bash
-# 1. Generate dataset (downloads WebSight, filters, renders screenshots)
-python generate_dataset_web.py
+# Base model eval (parallel — fires all prompts at once)
+python eval_agent.py --n 10 --turns 2 --provider tinker --name my-eval
 
-# 2. Train (RL loop with Tinker)
-python train.py
+# RL model eval
+python eval_agent.py --n 10 --turns 2 --provider tinker \
+  --model_path "tinker://session-id/sampler_weights/name" --name my-rl-eval
 
-# 3. Eval (compare base vs RL model)
-python eval.py
+# Flow eval (Mind2Web action sequences)
+python mind2web_eval.py --n 5 --turns 2 --provider tinker
 ```
 
-### Alternative dataset generators
-
-```bash
-# Synthetic HTML snippets (no download needed)
-python generate_dataset.py
-
-# Design2Code benchmark
-python download_design2code.py
-```
-
-### Eval options
-
-```bash
-python eval.py --n 20                          # more eval examples
-python eval.py --model_path "tinker://..."     # specific model checkpoint
-python eval.py --base_only                     # base model only
-```
-
-## Configuration
-
-All config lives in `config.py` and can be overridden via environment variables:
+## Key Config (env vars)
 
 | Variable | Default | Description |
-|---|---|---|
+|----------|---------|-------------|
 | `MODEL` | `Qwen/Qwen3.5-27B` | Base model |
-| `LORA_RANK` | `32` | LoRA rank |
-| `BATCH_SIZE` | `8` | Batch size |
-| `GROUP_SIZE` | `8` | Rollouts per example (GRPO) |
-| `MAX_TOKENS` | `1024` | Max generation tokens |
-| `KL_BETA` | `0.05` | KL penalty coefficient |
-| `SAVE_EVERY` | `15` | Checkpoint frequency (batches) |
-| `LR` | `4e-5` | Learning rate |
-| `WEBSIGHT_TARGET` | `2000` | Dataset size |
-| `MAX_HTML_CHARS` | `2000` | Max HTML length filter |
-| `LOG_DIR` | `./runs` | Training logs and checkpoints |
+| `BATCH_SIZE` | `16` | Prompts per batch |
+| `GROUP_SIZE` | `4` | Rollouts per prompt |
+| `MAX_TURNS` | `2` | Agent turns (analyze-fix) |
+| `TOKENS_PER_TURN` | `8192` | Max generation tokens |
+| `KL_BETA` | `0.02` | KL penalty |
+| `SAVE_EVERY` | `5` | Checkpoint frequency |
+| `MANIFEST_PATH` | `data/manifest.json` | Dataset path |
 
-## Project Structure
+## Reward
+
+Content-gated SSIM + text + color:
 
 ```
-prox/
-  config.py                 # Shared configuration
-  generate_dataset_web.py   # WebSight dataset generator
-  generate_dataset.py       # Synthetic dataset generator
-  download_design2code.py   # Design2Code benchmark downloader
-  train.py                  # RL training loop
-  eval.py                   # Evaluation script
-  reward.py                 # Multi-signal reward function
-  run.sh                    # End-to-end pipeline script
-  requirements.txt          # Python dependencies
-  data/                     # Generated datasets (gitignored)
-  runs/                     # Training logs and checkpoints (gitignored)
-  eval_output/              # Evaluation outputs (gitignored)
+content_gate = 0.2 + 0.8 * max(text_match, color_match)
+reward = 2 * (0.60 * ssim * content_gate + 0.25 * text + 0.15 * color) - 1
+```
+
+Blank pages score -0.78. Perfect match scores +1.0. No hard gates.
+
+## Files
+
+```
+config.py           # Shared configuration
+reward.py           # Reward function (content-gated SSIM)
+train_simple.py     # Single-shot RL training
+train_agent.py      # Multi-turn agent RL (analyze-fix)
+train_flow.py       # Interactive flow RL (action sequences)
+eval_agent.py       # Eval with parallel inference
+mind2web_eval.py    # Flow eval on Mind2Web
+DEMO.md             # Visual results and comparisons
+EXPERIMENTS.md      # Full experiment log (16 experiments)
+EVAL.md             # Latest eval report
 ```
